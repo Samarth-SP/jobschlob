@@ -18,17 +18,22 @@ export function ThemeSwitcher() {
   }
 
   return (
-    <select
-      value={theme}
-      onChange={(e) => change(e.target.value as ThemeId)}
-      className="rounded border border-accent/30 bg-background px-2 py-1 text-xs text-foreground-muted"
-      aria-label="Theme"
-    >
-      {THEMES.map((t) => (
-        <option key={t.id} value={t.id}>
-          {t.label}
-        </option>
-      ))}
-    </select>
+    <div className="relative inline-flex h-6 w-6 items-center justify-center" title="Theme">
+      <span aria-hidden className="pointer-events-none text-base leading-none">
+        🎨
+      </span>
+      <select
+        value={theme}
+        onChange={(e) => change(e.target.value as ThemeId)}
+        className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+        aria-label="Theme"
+      >
+        {THEMES.map((t) => (
+          <option key={t.id} value={t.id}>
+            {t.label}
+          </option>
+        ))}
+      </select>
+    </div>
   );
 }

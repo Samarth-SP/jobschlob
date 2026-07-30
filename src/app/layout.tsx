@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
+import { auth, signOut } from "@/lib/auth";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -28,11 +29,13 @@ try {
 } catch (e) {}
 `;
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  const session = await auth();
+
   return (
     <html
       lang="en"
@@ -58,7 +61,21 @@ export default function RootLayout({
               Profile
             </Link>
           </div>
-          <ThemeSwitcher />
+          <div className="flex items-center gap-3">
+            <ThemeSwitcher />
+            {session?.user && (
+              <form
+                action={async () => {
+                  "use server";
+                  await signOut();
+                }}
+              >
+                <button type="submit" className="hover:text-accent">
+                  Sign out
+                </button>
+              </form>
+            )}
+          </div>
         </nav>
         <div className="flex flex-1 flex-col">{children}</div>
       </body>
