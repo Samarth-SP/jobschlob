@@ -1,7 +1,7 @@
 import { auth } from "@/lib/auth";
-import { getApplicationEventsByDay, getFunnelCounts, getAvgMatchScore } from "@/db/queries";
+import { getApplicationEventsByDay, getStatusTransitions, getAvgMatchScore } from "@/db/queries";
 import { Heatmap } from "@/components/Heatmap";
-import { FunnelChart } from "@/components/FunnelChart";
+import { SankeyChart } from "@/components/SankeyChart";
 
 export default async function AnalyticsPage() {
   const session = await auth();
@@ -10,9 +10,9 @@ export default async function AnalyticsPage() {
   }
   const userId = session.user.email;
 
-  const [byDay, funnel, avgMatch] = await Promise.all([
+  const [byDay, transitions, avgMatch] = await Promise.all([
     getApplicationEventsByDay(userId),
-    getFunnelCounts(userId),
+    getStatusTransitions(userId),
     getAvgMatchScore(userId),
   ]);
 
@@ -44,8 +44,8 @@ export default async function AnalyticsPage() {
       </section>
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold uppercase text-foreground-muted">Funnel</h2>
-        <FunnelChart counts={funnel} />
+        <h2 className="text-sm font-semibold uppercase text-foreground-muted">Status flow</h2>
+        <SankeyChart edges={transitions} />
       </section>
     </main>
   );

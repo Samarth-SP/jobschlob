@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { auth } from "@/lib/auth";
-import { getRankedBoard, getTrackedJobs, getAvgMatchScore } from "@/db/queries";
+import { getRankedBoard, getTrackedJobs, getAvgMatchScore, getFilters } from "@/db/queries";
 import { StatusEditor } from "@/components/StatusEditor";
+import { NewJobsSection } from "@/components/NewJobsSection";
 
 export default async function DashboardPage() {
   const session = await auth();
@@ -10,10 +11,11 @@ export default async function DashboardPage() {
   }
   const userId = session.user.email;
 
-  const [board, tracked, avgMatch] = await Promise.all([
+  const [board, tracked, avgMatch, filters] = await Promise.all([
     getRankedBoard(userId),
     getTrackedJobs(userId),
     getAvgMatchScore(userId),
+    getFilters(userId),
   ]);
 
   const newJobs = board.filter((job) => !job.status);
@@ -36,31 +38,7 @@ export default async function DashboardPage() {
 
       <section className="flex flex-col gap-3">
         <h1 className="text-xl font-semibold text-pop">New jobs</h1>
-        <ul className="flex flex-col gap-3">
-          {newJobs.map((job) => (
-            <li
-              key={job.id}
-              className="flex items-center justify-between gap-4 rounded border border-accent/20 bg-surface p-3"
-            >
-              <div>
-                <a
-                  href={job.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="font-medium text-foreground hover:underline"
-                >
-                  {job.title}
-                </a>
-                <div className="text-sm text-foreground-muted">
-                  {job.company} · {job.location ?? "remote/unspecified"}
-                  {job.score !== null && <> · match {job.score}</>}
-                </div>
-              </div>
-              <StatusEditor jobId={job.id} status={job.status} />
-            </li>
-          ))}
-          {newJobs.length === 0 && <p className="text-foreground-muted">No new jobs — run the ingest script.</p>}
-        </ul>
+        <NewJobsSection jobs={newJobs} initialFilters={filters} />
       </section>
 
       <section className="flex flex-col gap-3">

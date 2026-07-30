@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import Link from "next/link";
 import { ThemeSwitcher } from "@/components/ThemeSwitcher";
+import { NavLogo } from "@/components/NavLogo";
 import { auth, signOut } from "@/lib/auth";
 import "./globals.css";
 
@@ -46,8 +47,8 @@ export default async function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: NO_FLASH_SCRIPT }} />
       </head>
       <body className="min-h-full flex flex-col bg-background text-foreground">
-        <nav className="flex items-center justify-between gap-6 border-b border-accent/20 px-6 py-3 text-sm font-medium text-foreground-muted">
-          <div className="flex gap-6">
+        <nav className="grid grid-cols-3 items-center gap-6 border-b border-accent/20 px-6 py-3 text-sm font-medium text-foreground-muted">
+          <div className="flex justify-self-start gap-6">
             <Link href="/dashboard" className="hover:text-accent">
               Dashboard
             </Link>
@@ -61,13 +62,16 @@ export default async function RootLayout({
               Profile
             </Link>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="justify-self-center">
+            <NavLogo />
+          </div>
+          <div className="flex items-center justify-self-end gap-3">
             <ThemeSwitcher />
             {session?.user && (
               <form
                 action={async () => {
                   "use server";
-                  await signOut();
+                  await signOut({ redirectTo: "/" });
                 }}
               >
                 <button type="submit" className="hover:text-accent">

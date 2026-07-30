@@ -1,0 +1,17 @@
+import { NextResponse } from "next/server";
+import { auth } from "@/lib/auth";
+import { setFilters } from "@/db/queries";
+
+export async function POST(req: Request) {
+  const session = await auth();
+  if (!session?.user?.email) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+
+  const body = await req.json();
+  await setFilters(session.user.email, {
+    minScore: typeof body.minScore === "number" ? body.minScore : undefined,
+    location: typeof body.location === "string" && body.location ? body.location : undefined,
+    company: typeof body.company === "string" && body.company ? body.company : undefined,
+  });
+
+  return NextResponse.json({ ok: true });
+}

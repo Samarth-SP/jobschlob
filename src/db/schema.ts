@@ -30,6 +30,9 @@ export const profiles = pgTable("profiles", {
   // Free-text corpus — experience, skills, goals. Scored against jobs (lib/match.ts) and
   // scaffolded into resumes/cover letters (lib/resume-scaffold.ts).
   background: text("background").notNull().default(""),
+  // Dashboard "new jobs" filters — { minScore?: number, location?: string, company?: string }.
+  // Persisted per-user so filter settings survive a return visit; see lib/dashboard-filters.ts.
+  filters: jsonb("filters").notNull().default({}),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
