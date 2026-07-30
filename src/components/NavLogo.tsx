@@ -1,5 +1,6 @@
 "use client";
 
+import { usePathname } from "next/navigation";
 import { motion } from "motion/react";
 import { ASCII_LOGO } from "@/lib/ascii-logo";
 
@@ -7,7 +8,12 @@ import { ASCII_LOGO } from "@/lib/ascii-logo";
 // right after the OAuth redirect lands on an authenticated page) to read as the hero "arriving"
 // in the navbar. An actual continuous shared-element transition isn't possible across the
 // full-page redirect through GitHub's OAuth flow, so this is the closest honest approximation.
+// Hidden on "/" itself since the full-size hero already renders there — showing both looks
+// like a doubled-up logo.
 export function NavLogo() {
+  const pathname = usePathname();
+  if (pathname === "/") return null;
+
   return (
     <motion.pre
       initial={{ opacity: 0, y: -8 }}
