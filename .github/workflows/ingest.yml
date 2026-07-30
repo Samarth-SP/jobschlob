@@ -17,3 +17,4 @@ jobs:
       - run: npm run ingest
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
