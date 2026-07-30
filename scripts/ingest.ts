@@ -23,7 +23,7 @@ async function fetchSource(slug: string) {
   const { jobs: listings }: { jobs: GreenhouseJob[] } = await res.json();
 
   return listings.map((j) => ({
-    id: jobId(`greenhouse:${slug}`, j.title, slug),
+    id: jobId(`greenhouse:${slug}`, j.id),
     title: j.title,
     company: slug,
     location: j.location?.name ?? null,
