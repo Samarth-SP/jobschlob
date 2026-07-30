@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, jsonb, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, jsonb, integer, serial, index, uniqueIndex } from "drizzle-orm/pg-core";
 
 export const jobs = pgTable("jobs", {
   id: text("id").primaryKey(), // dedupe hash, see lib/dedupe.ts
@@ -25,8 +25,60 @@ export const trackedJobs = pgTable(
   (t) => [uniqueIndex("tracked_jobs_user_job_idx").on(t.userId, t.jobId)],
 );
 
+// Scheduled for removal once /profile ships (see CLAUDE.md) — superseded by profiles.background
+// + jobMatches, which replace keyword-weight scoring with LLM-scored compatibility.
 export const preferences = pgTable("preferences", {
   userId: text("user_id").primaryKey(),
   // { keyword: weight } — see lib/score.ts for how this is applied
   keywordWeights: jsonb("keyword_weights").notNull().default({}),
+});
+
+export const profiles = pgTable("profiles", {
+  userId: text("user_id").primaryKey(),
+  // Free-text corpus — experience, skills, goals. Scored against jobs (lib/match.ts) and
+  // scaffolded into resumes/cover letters (lib/resume-scaffold.ts).
+  background: text("background").notNull().default(""),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const jobMatches = pgTable(
+  "job_matches",
+  {
+    userId: text("user_id").notNull(),
+    jobId: text("job_id")
+      .notNull()
+      .references(() => jobs.id, { onDelete: "cascade" }),
+    score: integer("score").notNull(), // 0-100 compatibility, from lib/match.ts
+    rationale: text("rationale"),
+    computedAt: timestamp("computed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("job_matches_user_job_idx").on(t.userId, t.jobId)],
+);
+
+// Append-only status history — the source of truth for the analytics heatmap/funnel.
+// Written only by trackJob() in queries.ts, and only when the status actually changes.
+export const applicationEvents = pgTable(
+  "application_events",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    jobId: text("job_id")
+      .notNull()
+      .references(() => jobs.id, { onDelete: "cascade" }),
+    status: text("status").notNull(),
+    changedAt: timestamp("changed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("application_events_user_changed_idx").on(t.userId, t.changedAt)],
+);
+
+export const documents = pgTable("documents", {
+  id: serial("id").primaryKey(),
+  userId: text("user_id").notNull(),
+  // Nullable: a resume/cover letter can be general-purpose or tailored to one job.
+  jobId: text("job_id").references(() => jobs.id, { onDelete: "set null" }),
+  kind: text("kind").notNull(), // 'resume' | 'cover_letter'
+  latex: text("latex").notNull(),
+  // { ok: boolean, missingSections: string[], extractedPreview: string } — see lib/ats-check.ts
+  atsNotes: jsonb("ats_notes"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

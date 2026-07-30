@@ -1,6 +1,6 @@
-import { eq, and, desc, sql } from "drizzle-orm";
+import { eq, and, desc, sql, avg, count, inArray } from "drizzle-orm";
 import { db } from "./client";
-import { jobs, trackedJobs, preferences } from "./schema";
+import { jobs, trackedJobs, preferences, profiles, jobMatches, applicationEvents, documents } from "./schema";
 import { scoreJob, type KeywordWeights } from "@/lib/score";
 
 // Every function below takes userId first and filters on it — jobs is the one shared,
@@ -39,7 +39,16 @@ export async function getTrackedJobs(userId: string) {
     .where(eq(trackedJobs.userId, userId));
 }
 
+// The single choke point for tracked-job status changes — every caller gets status-history
+// logging for free. Only logs an event when the status actually changed (including the very
+// first insert), so a notes-only edit or a duplicate call doesn't pollute the analytics
+// heatmap/funnel with phantom entries.
 export async function trackJob(userId: string, jobId: string, status: string, notes?: string) {
+  const [existing] = await db
+    .select({ status: trackedJobs.status })
+    .from(trackedJobs)
+    .where(and(eq(trackedJobs.userId, userId), eq(trackedJobs.jobId, jobId)));
+
   await db
     .insert(trackedJobs)
     .values({ userId, jobId, status, notes })
@@ -47,6 +56,10 @@ export async function trackJob(userId: string, jobId: string, status: string, no
       target: [trackedJobs.userId, trackedJobs.jobId],
       set: { status, notes, updatedAt: new Date() },
     });
+
+  if (!existing || existing.status !== status) {
+    await db.insert(applicationEvents).values({ userId, jobId, status });
+  }
 }
 
 export async function untrackJob(userId: string, jobId: string) {
@@ -71,4 +84,97 @@ export async function upsertJobs(rows: (typeof jobs.$inferInsert)[]) {
         postedAt: sql`excluded.posted_at`,
       },
     });
+}
+
+export async function getProfile(userId: string): Promise<string> {
+  const [row] = await db.select({ background: profiles.background }).from(profiles).where(eq(profiles.userId, userId));
+  return row?.background ?? "";
+}
+
+export async function setProfile(userId: string, background: string) {
+  await db
+    .insert(profiles)
+    .values({ userId, background })
+    .onConflictDoUpdate({ target: profiles.userId, set: { background, updatedAt: new Date() } });
+}
+
+// Ingest-only — populates jobMatches for a batch of newly-seen jobs against one user.
+export async function saveJobMatches(
+  rows: { userId: string; jobId: string; score: number; rationale: string | null }[],
+) {
+  if (rows.length === 0) return;
+  await db
+    .insert(jobMatches)
+    .values(rows)
+    .onConflictDoUpdate({
+      target: [jobMatches.userId, jobMatches.jobId],
+      set: { score: sql`excluded.score`, rationale: sql`excluded.rationale`, computedAt: new Date() },
+    });
+}
+
+export async function getJobMatches(userId: string) {
+  return db.select().from(jobMatches).where(eq(jobMatches.userId, userId));
+}
+
+export async function getApplicationEvents(userId: string) {
+  return db
+    .select()
+    .from(applicationEvents)
+    .where(eq(applicationEvents.userId, userId))
+    .orderBy(applicationEvents.changedAt);
+}
+
+export async function getApplicationEventsByDay(userId: string) {
+  return db
+    .select({
+      day: sql<string>`date(${applicationEvents.changedAt})`.as("day"),
+      count: count(),
+    })
+    .from(applicationEvents)
+    .where(and(eq(applicationEvents.userId, userId), eq(applicationEvents.status, "applied")))
+    .groupBy(sql`date(${applicationEvents.changedAt})`);
+}
+
+// Per-status count of distinct jobs that ever reached that status. Callers pick the funnel
+// order/subset to display — this just returns the raw grouped counts.
+export async function getFunnelCounts(userId: string) {
+  return db
+    .select({ status: applicationEvents.status, jobCount: sql<number>`count(distinct ${applicationEvents.jobId})` })
+    .from(applicationEvents)
+    .where(eq(applicationEvents.userId, userId))
+    .groupBy(applicationEvents.status);
+}
+
+export async function getAvgMatchScore(userId: string): Promise<{ overall: number | null; applied: number | null }> {
+  const [overallRow] = await db
+    .select({ avg: avg(jobMatches.score) })
+    .from(jobMatches)
+    .where(eq(jobMatches.userId, userId));
+
+  const appliedJobIds = db
+    .select({ jobId: trackedJobs.jobId })
+    .from(trackedJobs)
+    .where(and(eq(trackedJobs.userId, userId), sql`${trackedJobs.status} != 'interested'`));
+
+  const [appliedRow] = await db
+    .select({ avg: avg(jobMatches.score) })
+    .from(jobMatches)
+    .where(and(eq(jobMatches.userId, userId), inArray(jobMatches.jobId, appliedJobIds)));
+
+  return {
+    overall: overallRow?.avg ? Number(overallRow.avg) : null,
+    applied: appliedRow?.avg ? Number(appliedRow.avg) : null,
+  };
+}
+
+export async function getDocuments(userId: string, jobId?: string) {
+  const conditions = jobId
+    ? and(eq(documents.userId, userId), eq(documents.jobId, jobId))
+    : eq(documents.userId, userId);
+  return db.select().from(documents).where(conditions).orderBy(desc(documents.createdAt));
+}
+
+export async function saveDocument(row: typeof documents.$inferInsert) {
+  const [saved] = await db.insert(documents).values(row).returning();
+  return saved;
 }
