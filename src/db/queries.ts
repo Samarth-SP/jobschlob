@@ -19,6 +19,11 @@ export async function getRankedBoard(userId: string) {
   return rows.map((r) => ({ ...r.job, status: r.status, score: r.score }));
 }
 
+export async function getJobById(id: string) {
+  const [job] = await db.select().from(jobs).where(eq(jobs.id, id));
+  return job ?? null;
+}
+
 export async function getTrackedJobs(userId: string) {
   return db
     .select({ job: jobs, status: trackedJobs.status, notes: trackedJobs.notes })
