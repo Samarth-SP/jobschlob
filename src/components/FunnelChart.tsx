@@ -13,14 +13,14 @@ export function FunnelChart({ counts }: { counts: { status: string; jobCount: nu
         const pct = Math.max(4, (value / max) * 100);
         return (
           <div key={stage} className="flex items-center gap-3 text-sm">
-            <div className="w-24 shrink-0 text-ink-soft">{stage.replace("_", " ")}</div>
-            <div className="flex-1 rounded bg-cream-dim">
+            <div className="w-24 shrink-0 text-foreground-muted">{stage.replace("_", " ")}</div>
+            <div className="flex-1 rounded bg-surface">
               <div
-                className="h-5 rounded bg-green"
+                className="h-5 rounded bg-accent"
                 style={{ width: `${pct}%` }}
               />
             </div>
-            <div className="w-8 shrink-0 text-right text-ink">{value}</div>
+            <div className="w-8 shrink-0 text-right text-foreground">{value}</div>
           </div>
         );
       })}

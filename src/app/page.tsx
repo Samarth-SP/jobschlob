@@ -9,7 +9,7 @@ export default async function Home() {
   return (
     <main className="flex flex-1 flex-col items-center justify-center gap-8 px-6 text-center">
       <AsciiHero />
-      <p className="max-w-md text-ink-soft">
+      <p className="max-w-md text-foreground-muted">
         One board. Jobs ranked by how well they match your background, applications tracked start
         to finish, and a workshop to tailor your resume for each one.
       </p>
@@ -20,7 +20,7 @@ export default async function Home() {
         }}
       >
         <button
-          className="rounded bg-green px-5 py-2.5 font-medium text-cream transition-colors hover:bg-green-dim"
+          className="rounded bg-accent px-5 py-2.5 font-medium text-background transition-colors hover:bg-accent-strong"
           type="submit"
         >
           Sign in with GitHub

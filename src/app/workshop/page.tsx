@@ -14,10 +14,10 @@ export default async function WorkshopPage() {
   if (!background.trim()) {
     return (
       <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-4 px-6 py-8">
-        <h1 className="text-xl font-semibold text-ink">Workshop</h1>
-        <p className="text-ink-soft">
+        <h1 className="text-xl font-semibold text-pop">Workshop</h1>
+        <p className="text-foreground-muted">
           Add your background on the{" "}
-          <Link href="/profile" className="text-green underline">
+          <Link href="/profile" className="text-accent underline">
             profile page
           </Link>{" "}
           first — the workshop scaffolds resumes and cover letters from it.
@@ -28,8 +28,8 @@ export default async function WorkshopPage() {
 
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-4 px-6 py-8">
-      <h1 className="text-xl font-semibold text-ink">Workshop</h1>
-      <p className="text-sm text-ink-soft">
+      <h1 className="text-xl font-semibold text-pop">Workshop</h1>
+      <p className="text-sm text-foreground-muted">
         Scaffolds your background into a LaTeX resume or cover letter, compiles it to a real PDF,
         and checks that the text extracts cleanly — the same way an ATS would read it.
       </p>

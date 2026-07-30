@@ -18,33 +18,33 @@ export default async function AnalyticsPage() {
 
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-10 px-6 py-8">
-      <h1 className="text-xl font-semibold text-ink">Analytics</h1>
+      <h1 className="text-xl font-semibold text-pop">Analytics</h1>
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold uppercase text-ink-soft">Average match score</h2>
+        <h2 className="text-sm font-semibold uppercase text-foreground-muted">Average match score</h2>
         <div className="flex gap-8">
           <div>
-            <div className="text-2xl font-semibold text-ink">
+            <div className="text-2xl font-semibold text-foreground">
               {avgMatch.overall !== null ? Math.round(avgMatch.overall) : "—"}
             </div>
-            <div className="text-sm text-ink-soft">across all scored jobs</div>
+            <div className="text-sm text-foreground-muted">across all scored jobs</div>
           </div>
           <div>
-            <div className="text-2xl font-semibold text-ink">
+            <div className="text-2xl font-semibold text-foreground">
               {avgMatch.applied !== null ? Math.round(avgMatch.applied) : "—"}
             </div>
-            <div className="text-sm text-ink-soft">across jobs you tracked</div>
+            <div className="text-sm text-foreground-muted">across jobs you tracked</div>
           </div>
         </div>
       </section>
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold uppercase text-ink-soft">Applications per day</h2>
+        <h2 className="text-sm font-semibold uppercase text-foreground-muted">Applications per day</h2>
         <Heatmap counts={byDay} />
       </section>
 
       <section className="flex flex-col gap-3">
-        <h2 className="text-sm font-semibold uppercase text-ink-soft">Funnel</h2>
+        <h2 className="text-sm font-semibold uppercase text-foreground-muted">Funnel</h2>
         <FunnelChart counts={funnel} />
       </section>
     </main>

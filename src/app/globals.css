@@ -1,41 +1,110 @@
 @import "tailwindcss";
 
+/* Semantic roles, not literal color names: --background is the page backdrop, --foreground is
+   normal body text, --accent is interactive/border color, --pop is reserved for titles/headings
+   only. Every theme below fills in the same six variables. */
 :root {
-  --color-cream: #f4efe4;
-  --color-cream-dim: #e9e1d0;
-  --color-ink: #2e211a;
-  --color-ink-soft: #5a4b3f;
-  --color-green: #3f6b4b;
-  --color-green-dim: #2f5239;
-  --color-green-tint: #e3ece5;
-  --color-black: #14110d;
-
-  --background: var(--color-cream);
-  --foreground: var(--color-ink);
+  --background: #f4efe4;
+  --surface: #e9e1d0;
+  --foreground: #1a1613;
+  --foreground-muted: #6b5d4f;
+  --accent: #8b5a2b;
+  --accent-strong: #6b4620;
+  --pop: #3f6b4b;
+  --pop-tint: #e3ece5;
 }
 
 @theme inline {
-  --color-cream: var(--color-cream);
-  --color-cream-dim: var(--color-cream-dim);
-  --color-ink: var(--color-ink);
-  --color-ink-soft: var(--color-ink-soft);
-  --color-green: var(--color-green);
-  --color-green-dim: var(--color-green-dim);
-  --color-green-tint: var(--color-green-tint);
-  --color-black: var(--color-black);
   --color-background: var(--background);
+  --color-surface: var(--surface);
   --color-foreground: var(--foreground);
+  --color-foreground-muted: var(--foreground-muted);
+  --color-accent: var(--accent);
+  --color-accent-strong: var(--accent-strong);
+  --color-pop: var(--pop);
+  --color-pop-tint: var(--pop-tint);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
+/* Respects OS preference only until the user picks an explicit theme (data-theme set below). */
 @media (prefers-color-scheme: dark) {
-  :root {
-    --color-cream-dim: #241c15;
-    --color-green-tint: #1b2620;
-    --background: var(--color-black);
-    --foreground: var(--color-cream);
+  :root:not([data-theme]) {
+    --background: #14110d;
+    --surface: #201a14;
+    --foreground: #f4efe4;
+    --foreground-muted: #a89a8a;
+    --accent: #c98a4b;
+    --accent-strong: #e2a568;
+    --pop: #6fae82;
+    --pop-tint: #1b2620;
   }
+}
+
+:root[data-theme="jobschlob-light"] {
+  --background: #f4efe4;
+  --surface: #e9e1d0;
+  --foreground: #1a1613;
+  --foreground-muted: #6b5d4f;
+  --accent: #8b5a2b;
+  --accent-strong: #6b4620;
+  --pop: #3f6b4b;
+  --pop-tint: #e3ece5;
+}
+
+:root[data-theme="jobschlob-dark"] {
+  --background: #14110d;
+  --surface: #201a14;
+  --foreground: #f4efe4;
+  --foreground-muted: #a89a8a;
+  --accent: #c98a4b;
+  --accent-strong: #e2a568;
+  --pop: #6fae82;
+  --pop-tint: #1b2620;
+}
+
+:root[data-theme="gruvbox"] {
+  --background: #282828;
+  --surface: #3c3836;
+  --foreground: #ebdbb2;
+  --foreground-muted: #a89984;
+  --accent: #d79921;
+  --accent-strong: #fabd2f;
+  --pop: #b8bb26;
+  --pop-tint: #32361f;
+}
+
+:root[data-theme="nord"] {
+  --background: #2e3440;
+  --surface: #3b4252;
+  --foreground: #eceff4;
+  --foreground-muted: #9fb0c9;
+  --accent: #5e81ac;
+  --accent-strong: #81a1c1;
+  --pop: #a3be8c;
+  --pop-tint: #333c4a;
+}
+
+:root[data-theme="dracula"] {
+  --background: #282a36;
+  --surface: #343746;
+  --foreground: #f8f8f2;
+  --foreground-muted: #a3adcc;
+  --accent: #bd93f9;
+  --accent-strong: #d6acff;
+  --pop: #50fa7b;
+  --pop-tint: #2e3d31;
+}
+
+:root[data-theme="monkeytype"] {
+  --background: #323437;
+  --surface: #2c2e31;
+  --foreground: #d1d0c5;
+  --foreground-muted: #7c7e82;
+  --accent: #e2b714;
+  --accent-strong: #f0c743;
+  --pop: #f5cf4b;
+  --pop-tint: #3a3325;
 }
 
 body {

@@ -41,7 +41,7 @@ export function StatusEditor({ jobId, status }: { jobId: string; status: string 
       <select
         value={status ?? ""}
         onChange={(e) => (e.target.value ? setStatus(e.target.value) : untrack())}
-        className="rounded border border-ink-soft/30 bg-cream px-2 py-1 text-ink"
+        className="rounded border border-accent/30 bg-background px-2 py-1 text-foreground"
       >
         <option value="">not tracked</option>
         {STATUSES.map((s) => (

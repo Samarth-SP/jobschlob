@@ -40,7 +40,7 @@ export function WorkshopForm({ jobs }: { jobs: { id: string; title: string; comp
         <select
           value={kind}
           onChange={(e) => setKind(e.target.value as "resume" | "cover_letter")}
-          className="rounded border border-ink-soft/30 bg-cream px-2 py-1.5 text-sm text-ink"
+          className="rounded border border-accent/30 bg-background px-2 py-1.5 text-sm text-foreground"
         >
           <option value="resume">Resume</option>
           <option value="cover_letter">Cover letter</option>
@@ -48,7 +48,7 @@ export function WorkshopForm({ jobs }: { jobs: { id: string; title: string; comp
         <select
           value={jobId}
           onChange={(e) => setJobId(e.target.value)}
-          className="rounded border border-ink-soft/30 bg-cream px-2 py-1.5 text-sm text-ink"
+          className="rounded border border-accent/30 bg-background px-2 py-1.5 text-sm text-foreground"
         >
           <option value="">General (no specific job)</option>
           {jobs.map((j) => (
@@ -60,7 +60,7 @@ export function WorkshopForm({ jobs }: { jobs: { id: string; title: string; comp
         <button
           onClick={generate}
           disabled={loading}
-          className="rounded bg-green px-4 py-1.5 text-sm text-cream hover:bg-green-dim disabled:opacity-50"
+          className="rounded bg-accent px-4 py-1.5 text-sm text-background hover:bg-accent-strong disabled:opacity-50"
         >
           {loading ? "Generating…" : result ? "Regenerate" : "Generate"}
         </button>
@@ -90,18 +90,18 @@ export function WorkshopForm({ jobs }: { jobs: { id: string; title: string; comp
               </div>
             )}
             {result.atsNotes.ok && (
-              <p className="rounded border border-green/40 bg-green-tint p-3 text-sm text-ink">
+              <p className="rounded border border-pop/40 bg-pop-tint p-3 text-sm text-foreground">
                 ATS check passed — text extracted cleanly from the compiled PDF.
               </p>
             )}
 
             {pdfUrl && (
               <>
-                <embed src={pdfUrl} type="application/pdf" className="h-[600px] w-full rounded border border-ink-soft/20" />
+                <embed src={pdfUrl} type="application/pdf" className="h-[600px] w-full rounded border border-accent/20" />
                 <a
                   href={pdfUrl}
                   download={`${kind}.pdf`}
-                  className="w-fit text-sm text-green underline"
+                  className="w-fit text-sm text-accent underline"
                 >
                   Download PDF
                 </a>

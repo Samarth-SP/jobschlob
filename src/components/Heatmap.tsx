@@ -1,6 +1,9 @@
-// Hand-rolled GitHub-style calendar heatmap — single-hue sequential ramp (light -> dark green),
-// no charting dependency for a 7xN grid of colored cells.
-const LEVELS = ["#e9e1d0", "#cfe0d2", "#9dc2a5", "#5f9470", "#2f5239"];
+// Hand-rolled GitHub-style calendar heatmap — single-hue sequential ramp (surface -> accent),
+// no charting dependency for a 7xN grid of colored cells. Mixed via color-mix() rather than
+// hardcoded hex so it adapts to whichever theme is active (see globals.css / ThemeSwitcher).
+const LEVELS = [0, 25, 50, 75, 100].map(
+  (pct) => `color-mix(in srgb, var(--surface), var(--accent) ${pct}%)`,
+);
 
 function levelFor(count: number) {
   if (count === 0) return 0;
