@@ -1,17 +1,7 @@
 "use client";
 
 import { motion } from "motion/react";
-
-// Generated once via `figlet -f "ANSI Shadow"` — the wordmark never changes, so this is a
-// hardcoded string rather than a runtime figlet dependency.
-const ASCII_LOGO = String.raw`
-     ██╗ ██████╗ ██████╗ ███████╗ ██████╗██╗  ██╗██╗      ██████╗ ██████╗
-     ██║██╔═══██╗██╔══██╗██╔════╝██╔════╝██║  ██║██║     ██╔═══██╗██╔══██╗
-     ██║██║   ██║██████╔╝███████╗██║     ███████║██║     ██║   ██║██████╔╝
-██   ██║██║   ██║██╔══██╗╚════██║██║     ██╔══██║██║     ██║   ██║██╔══██╗
-╚█████╔╝╚██████╔╝██████╔╝███████║╚██████╗██║  ██║███████╗╚██████╔╝██████╔╝
- ╚════╝  ╚═════╝ ╚═════╝ ╚══════╝ ╚═════╝╚═╝  ╚═╝╚══════╝ ╚═════╝ ╚═════╝
-`.replace(/^\n|\n$/g, "");
+import { ASCII_LOGO } from "@/lib/ascii-logo";
 
 export function AsciiHero() {
   return (
