@@ -1,10 +1,21 @@
 "use client";
 
 import { useRouter } from "next/navigation";
+import { motion } from "motion/react";
 
-const STATUSES = ["interested", "applied", "interviewing", "offer", "rejected", "archived"];
+export const STATUSES = [
+  "interested",
+  "applied",
+  "heard_back",
+  "oa",
+  "interview",
+  "offer",
+  "rejected",
+  "ghosted",
+  "archived",
+];
 
-export function TrackControls({ jobId, status }: { jobId: string; status: string | null }) {
+export function StatusEditor({ jobId, status }: { jobId: string; status: string | null }) {
   const router = useRouter();
 
   async function setStatus(next: string) {
@@ -26,19 +37,19 @@ export function TrackControls({ jobId, status }: { jobId: string; status: string
   }
 
   return (
-    <div className="flex items-center gap-2 text-sm">
+    <motion.div layout className="flex items-center gap-2 text-sm">
       <select
         value={status ?? ""}
         onChange={(e) => (e.target.value ? setStatus(e.target.value) : untrack())}
-        className="rounded border px-2 py-1"
+        className="rounded border border-ink-soft/30 bg-cream px-2 py-1 text-ink"
       >
         <option value="">not tracked</option>
         {STATUSES.map((s) => (
           <option key={s} value={s}>
-            {s}
+            {s.replace("_", " ")}
           </option>
         ))}
       </select>
-    </div>
+    </motion.div>
   );
 }

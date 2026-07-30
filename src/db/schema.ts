@@ -18,20 +18,12 @@ export const trackedJobs = pgTable(
     jobId: text("job_id")
       .notNull()
       .references(() => jobs.id, { onDelete: "cascade" }),
-    status: text("status").notNull().default("interested"), // interested | applied | interviewing | offer | rejected | archived
+    status: text("status").notNull().default("interested"), // interested | applied | heard_back | oa | interview | offer | rejected | ghosted | archived
     notes: text("notes"),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("tracked_jobs_user_job_idx").on(t.userId, t.jobId)],
 );
-
-// Scheduled for removal once /profile ships (see CLAUDE.md) — superseded by profiles.background
-// + jobMatches, which replace keyword-weight scoring with LLM-scored compatibility.
-export const preferences = pgTable("preferences", {
-  userId: text("user_id").primaryKey(),
-  // { keyword: weight } — see lib/score.ts for how this is applied
-  keywordWeights: jsonb("keyword_weights").notNull().default({}),
-});
 
 export const profiles = pgTable("profiles", {
   userId: text("user_id").primaryKey(),

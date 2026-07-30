@@ -15,7 +15,7 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "jobschlob",
-  description: "Shared job board with per-user tracking and scoring",
+  description: "Job compatibility dashboard, application tracking, and resume workshop",
 };
 
 export default function RootLayout({
@@ -28,11 +28,20 @@ export default function RootLayout({
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">
-        <nav className="flex gap-4 border-b px-6 py-3 text-sm font-medium">
-          <Link href="/">Board</Link>
-          <Link href="/tracked">Tracked</Link>
-          <Link href="/prefs">Preferences</Link>
+      <body className="min-h-full flex flex-col bg-cream text-ink">
+        <nav className="flex gap-6 border-b border-ink-soft/20 px-6 py-3 text-sm font-medium text-ink-soft">
+          <Link href="/dashboard" className="hover:text-green">
+            Dashboard
+          </Link>
+          <Link href="/workshop" className="hover:text-green">
+            Workshop
+          </Link>
+          <Link href="/analytics" className="hover:text-green">
+            Analytics
+          </Link>
+          <Link href="/profile" className="hover:text-green">
+            Profile
+          </Link>
         </nav>
         <div className="flex flex-1 flex-col">{children}</div>
       </body>

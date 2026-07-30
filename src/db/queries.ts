@@ -1,34 +1,22 @@
 import { eq, and, desc, sql, avg, count, inArray } from "drizzle-orm";
 import { db } from "./client";
-import { jobs, trackedJobs, preferences, profiles, jobMatches, applicationEvents, documents } from "./schema";
-import { scoreJob, type KeywordWeights } from "@/lib/score";
+import { jobs, trackedJobs, profiles, jobMatches, applicationEvents, documents } from "./schema";
 
 // Every function below takes userId first and filters on it — jobs is the one shared,
 // non-user-scoped table (the board), touched only by upsertJobs from the ingest script.
 
-export async function getPreferences(userId: string): Promise<KeywordWeights> {
-  const [row] = await db.select().from(preferences).where(eq(preferences.userId, userId));
-  return (row?.keywordWeights as KeywordWeights) ?? {};
-}
-
-export async function setPreferences(userId: string, weights: KeywordWeights) {
-  await db
-    .insert(preferences)
-    .values({ userId, keywordWeights: weights })
-    .onConflictDoUpdate({ target: preferences.userId, set: { keywordWeights: weights } });
-}
-
-export async function getBoard(userId: string) {
-  const weights = await getPreferences(userId);
+// New jobs ranked by LLM compatibility score (jobMatches, populated by scripts/ingest.ts).
+// Unscored jobs (not yet matched, or the user has no profile) sort after scored ones by
+// createdAt, so this doesn't depend on ingest's match-scoring pass having run yet.
+export async function getRankedBoard(userId: string) {
   const rows = await db
-    .select({ job: jobs, status: trackedJobs.status })
+    .select({ job: jobs, status: trackedJobs.status, score: jobMatches.score })
     .from(jobs)
     .leftJoin(trackedJobs, and(eq(trackedJobs.jobId, jobs.id), eq(trackedJobs.userId, userId)))
-    .orderBy(desc(jobs.postedAt));
+    .leftJoin(jobMatches, and(eq(jobMatches.jobId, jobs.id), eq(jobMatches.userId, userId)))
+    .orderBy(sql`${jobMatches.score} DESC NULLS LAST`, desc(jobs.createdAt));
 
-  return rows
-    .map((r) => ({ ...r.job, status: r.status, score: scoreJob(r.job, weights) }))
-    .sort((a, b) => b.score - a.score);
+  return rows.map((r) => ({ ...r.job, status: r.status, score: r.score }));
 }
 
 export async function getTrackedJobs(userId: string) {

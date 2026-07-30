@@ -15,6 +15,13 @@
       "when": 1785385913915,
       "tag": "0001_grey_stature",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1785386153121,
+      "tag": "0002_dear_diamondback",
+      "breakpoints": true
     }
   ]
 }
