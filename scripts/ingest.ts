@@ -1,6 +1,7 @@
 import { db } from "../src/db/client";
-import { upsertJobs } from "../src/db/queries";
+import { upsertJobs, getAllProfiles, getMatchedJobIds, saveJobMatches } from "../src/db/queries";
 import { jobId } from "../src/lib/dedupe";
+import { scoreJobForUser } from "../src/lib/match";
 import { jobs, trackedJobs } from "../src/db/schema";
 import { and, lt, notInArray } from "drizzle-orm";
 
@@ -37,6 +38,23 @@ async function main() {
   const rows = (await Promise.all(SOURCES.map(fetchSource))).flat();
   await upsertJobs(rows);
   console.log(`ingested ${rows.length} jobs from ${SOURCES.length} source(s)`);
+
+  const profiles = await getAllProfiles();
+  const jobIds = rows.map((r) => r.id);
+  let scored = 0;
+  for (const profile of profiles) {
+    if (!profile.background.trim()) continue;
+    const alreadyMatched = await getMatchedJobIds(profile.userId, jobIds);
+    const toScore = rows.filter((r) => !alreadyMatched.has(r.id));
+    const matches: { userId: string; jobId: string; score: number; rationale: string | null }[] = [];
+    for (const job of toScore) {
+      const result = await scoreJobForUser(job, profile.background);
+      if (result) matches.push({ userId: profile.userId, jobId: job.id, ...result });
+    }
+    await saveJobMatches(matches);
+    scored += matches.length;
+  }
+  if (profiles.length) console.log(`scored ${scored} job matches across ${profiles.length} profile(s)`);
 
   const cutoff = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
   const tracked = await db.selectDistinct({ id: trackedJobs.jobId }).from(trackedJobs);

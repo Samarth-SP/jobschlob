@@ -104,6 +104,22 @@ export async function getJobMatches(userId: string) {
   return db.select().from(jobMatches).where(eq(jobMatches.userId, userId));
 }
 
+// Ingest-only — every user with a background set, to score newly-seen jobs against.
+export async function getAllProfiles() {
+  return db.select().from(profiles);
+}
+
+// Ingest-only — which of these jobIds already have a match for this user, so a fresh
+// upsert of an already-scored job doesn't trigger a redundant (and billed) LLM call.
+export async function getMatchedJobIds(userId: string, jobIds: string[]): Promise<Set<string>> {
+  if (jobIds.length === 0) return new Set();
+  const rows = await db
+    .select({ jobId: jobMatches.jobId })
+    .from(jobMatches)
+    .where(and(eq(jobMatches.userId, userId), inArray(jobMatches.jobId, jobIds)));
+  return new Set(rows.map((r) => r.jobId));
+}
+
 export async function getApplicationEvents(userId: string) {
   return db
     .select()
