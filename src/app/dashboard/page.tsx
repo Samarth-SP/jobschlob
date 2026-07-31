@@ -38,8 +38,8 @@ export default async function DashboardPage() {
         </Link>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[300px_1fr]">
-        <div className="flex flex-col gap-4">
+      <div className="grid min-w-0 grid-cols-1 gap-6 lg:grid-cols-[300px_1fr]">
+        <div className="flex min-w-0 flex-col gap-4">
           <ProfileCard email={userId} background={background} />
           <StatTiles tracked={tracked} />
           {avgMatch.overall !== null && (
@@ -55,7 +55,7 @@ export default async function DashboardPage() {
           )}
         </div>
 
-        <div className="flex flex-col gap-8">
+        <div className="flex min-w-0 flex-col gap-8">
           <section className="flex flex-col gap-3">
             <h2 className="text-lg font-semibold text-pop">New jobs</h2>
             <NewJobsSection jobs={newJobs} initialFilters={filters} />

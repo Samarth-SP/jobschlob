@@ -2,7 +2,10 @@
 
 import { useMemo, useRef, useState } from "react";
 import { RecommendationCard } from "@/components/RecommendationCard";
+import { splitLocations } from "@/lib/locations";
 import type { DashboardFilters } from "@/lib/dashboard-filters";
+
+const POPULAR_LOCATION_COUNT = 8;
 
 type Job = {
   id: string;
@@ -33,9 +36,33 @@ export function NewJobsSection({ jobs, initialFilters }: { jobs: Job[]; initialF
   const [levels, setLevels] = useState<string[]>(initialFilters.levels ?? []);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const availableLocations = useMemo(
-    () => [...new Set(jobs.map((j) => j.location).filter((l): l is string => !!l))].sort(),
-    [jobs],
+  const locationCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const j of jobs) {
+      for (const loc of splitLocations(j.location)) counts.set(loc, (counts.get(loc) ?? 0) + 1);
+    }
+    return counts;
+  }, [jobs]);
+
+  const popularLocations = useMemo(
+    () =>
+      [...locationCounts.entries()]
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, POPULAR_LOCATION_COUNT)
+        .map(([loc]) => loc),
+    [locationCounts],
+  );
+
+  // Selected locations stay visible as bubbles even if they fall out of the "popular" set (e.g.
+  // added via the dropdown below), so toggling one off doesn't require re-finding it in the list.
+  const visibleLocations = useMemo(
+    () => [...new Set([...popularLocations, ...locations])],
+    [popularLocations, locations],
+  );
+
+  const remainingLocations = useMemo(
+    () => [...locationCounts.keys()].filter((l) => !visibleLocations.includes(l)).sort(),
+    [locationCounts, visibleLocations],
   );
 
   function persist(next: DashboardFilters) {
@@ -62,7 +89,7 @@ export function NewJobsSection({ jobs, initialFilters }: { jobs: Job[]; initialF
   const filtered = useMemo(() => {
     return jobs.filter((job) => {
       if (minScore > 0 && (job.score === null || job.score < minScore)) return false;
-      if (locations.length && !(job.location && locations.includes(job.location))) return false;
+      if (locations.length && !splitLocations(job.location).some((l) => locations.includes(l))) return false;
       if (company && !job.company.toLowerCase().includes(company.toLowerCase())) return false;
       if (categories.length && !(job.category && categories.includes(job.category))) return false;
       if (levels.length && !(job.level && levels.includes(job.level))) return false;
@@ -124,22 +151,43 @@ export function NewJobsSection({ jobs, initialFilters }: { jobs: Job[]; initialF
           </div>
         </div>
 
-        {availableLocations.length > 0 && (
-          <label className="flex flex-col gap-1 text-foreground-muted">
-            Locations
-            <select
-              multiple
-              value={locations}
-              onChange={(e) => update({ locations: [...e.target.selectedOptions].map((o) => o.value) })}
-              className="h-20 min-w-40 rounded border border-accent/30 bg-background px-2 py-1 text-foreground"
-            >
-              {availableLocations.map((loc) => (
-                <option key={loc} value={loc}>
-                  {loc}
-                </option>
-              ))}
-            </select>
-          </label>
+        {visibleLocations.length > 0 && (
+          <div className="flex min-w-0 flex-1 flex-col gap-1">
+            <span className="text-foreground-muted">Locations</span>
+            <div className="flex flex-wrap items-center gap-1.5">
+              {visibleLocations.map((loc) => {
+                const active = locations.includes(loc);
+                return (
+                  <button
+                    key={loc}
+                    type="button"
+                    onClick={() => update({ locations: toggle(locations, loc) })}
+                    className={`rounded-full border px-2.5 py-1 text-xs transition-colors ${
+                      active
+                        ? "border-accent/40 bg-accent/15 text-accent"
+                        : "border-accent/20 bg-background text-foreground-muted hover:text-foreground"
+                    }`}
+                  >
+                    {loc}
+                  </button>
+                );
+              })}
+              {remainingLocations.length > 0 && (
+                <select
+                  value=""
+                  onChange={(e) => e.target.value && update({ locations: toggle(locations, e.target.value) })}
+                  className="max-w-40 rounded-full border border-accent/20 bg-background px-2.5 py-1 text-xs text-foreground-muted"
+                >
+                  <option value="">+ Add location</option>
+                  {remainingLocations.map((loc) => (
+                    <option key={loc} value={loc}>
+                      {loc}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          </div>
         )}
       </div>
 

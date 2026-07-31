@@ -87,7 +87,9 @@ async function fetchSimplifyFeed(feed: (typeof SIMPLIFY_FEEDS)[number]) {
       id: jobId(`simplify:${feed.level}`, l.id),
       title: l.title,
       company: l.company_name,
-      location: l.locations?.length ? l.locations.join(", ") : null,
+      // "; " not ", " — each entry is already a "City, State" string, so a comma can't be used
+      // to separate multiple locations without colliding with the comma inside each one.
+      location: l.locations?.length ? l.locations.join("; ") : null,
       url: l.url,
       source: `simplify:${feed.level}`,
       category: "tech" as const,
