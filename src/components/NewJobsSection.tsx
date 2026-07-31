@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useRef, useState } from "react";
-import { StatusEditor } from "@/components/StatusEditor";
+import { RecommendationCard } from "@/components/RecommendationCard";
 import type { DashboardFilters } from "@/lib/dashboard-filters";
 
 type Job = {
@@ -9,22 +9,34 @@ type Job = {
   title: string;
   company: string;
   location: string | null;
+  category: string | null;
+  level: string | null;
   url: string;
   postedAt: Date | string | null;
   status: string | null;
   score: number | null;
+  rationale: string | null;
 };
 
-function formatDate(d: Date | string | null) {
-  if (!d) return "date unknown";
-  return new Date(d).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+const CATEGORY_LABELS: Record<string, string> = { tech: "Tech", consulting: "Consulting", vc_pe: "VC/PE" };
+const LEVEL_LABELS: Record<string, string> = { internship: "Internship", new_grad: "New grad" };
+
+function toggle(list: string[], value: string): string[] {
+  return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
 }
 
 export function NewJobsSection({ jobs, initialFilters }: { jobs: Job[]; initialFilters: DashboardFilters }) {
   const [minScore, setMinScore] = useState(initialFilters.minScore ?? 0);
-  const [location, setLocation] = useState(initialFilters.location ?? "");
+  const [locations, setLocations] = useState<string[]>(initialFilters.locations ?? []);
   const [company, setCompany] = useState(initialFilters.company ?? "");
+  const [categories, setCategories] = useState<string[]>(initialFilters.categories ?? []);
+  const [levels, setLevels] = useState<string[]>(initialFilters.levels ?? []);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const availableLocations = useMemo(
+    () => [...new Set(jobs.map((j) => j.location).filter((l): l is string => !!l))].sort(),
+    [jobs],
+  );
 
   function persist(next: DashboardFilters) {
     if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -37,30 +49,30 @@ export function NewJobsSection({ jobs, initialFilters }: { jobs: Job[]; initialF
     }, 400);
   }
 
-  function update(next: { minScore?: number; location?: string; company?: string }) {
-    const merged = {
-      minScore: next.minScore ?? minScore,
-      location: next.location ?? location,
-      company: next.company ?? company,
-    };
+  function update(next: Partial<DashboardFilters>) {
+    const merged = { minScore, locations, company, categories, levels, ...next };
     if (next.minScore !== undefined) setMinScore(next.minScore);
-    if (next.location !== undefined) setLocation(next.location);
+    if (next.locations !== undefined) setLocations(next.locations);
     if (next.company !== undefined) setCompany(next.company);
+    if (next.categories !== undefined) setCategories(next.categories);
+    if (next.levels !== undefined) setLevels(next.levels);
     persist(merged);
   }
 
   const filtered = useMemo(() => {
     return jobs.filter((job) => {
       if (minScore > 0 && (job.score === null || job.score < minScore)) return false;
-      if (location && !(job.location ?? "").toLowerCase().includes(location.toLowerCase())) return false;
+      if (locations.length && !(job.location && locations.includes(job.location))) return false;
       if (company && !job.company.toLowerCase().includes(company.toLowerCase())) return false;
+      if (categories.length && !(job.category && categories.includes(job.category))) return false;
+      if (levels.length && !(job.level && levels.includes(job.level))) return false;
       return true;
     });
-  }, [jobs, minScore, location, company]);
+  }, [jobs, minScore, locations, company, categories, levels]);
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-3 text-sm">
+      <div className="flex flex-wrap items-start gap-4 text-sm">
         <label className="flex items-center gap-2 text-foreground-muted">
           Min match
           <input
@@ -74,52 +86,73 @@ export function NewJobsSection({ jobs, initialFilters }: { jobs: Job[]; initialF
         </label>
         <input
           type="text"
-          placeholder="Location contains…"
-          value={location}
-          onChange={(e) => update({ location: e.target.value })}
-          className="rounded border border-accent/30 bg-background px-2 py-1 text-foreground"
-        />
-        <input
-          type="text"
           placeholder="Company contains…"
           value={company}
           onChange={(e) => update({ company: e.target.value })}
           className="rounded border border-accent/30 bg-background px-2 py-1 text-foreground"
         />
+
+        <div className="flex flex-col gap-1">
+          <span className="text-foreground-muted">Type</span>
+          <div className="flex gap-3">
+            {Object.entries(CATEGORY_LABELS).map(([value, label]) => (
+              <label key={value} className="flex items-center gap-1 text-foreground">
+                <input
+                  type="checkbox"
+                  checked={categories.includes(value)}
+                  onChange={() => update({ categories: toggle(categories, value) })}
+                />
+                {label}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <span className="text-foreground-muted">Level</span>
+          <div className="flex gap-3">
+            {Object.entries(LEVEL_LABELS).map(([value, label]) => (
+              <label key={value} className="flex items-center gap-1 text-foreground">
+                <input
+                  type="checkbox"
+                  checked={levels.includes(value)}
+                  onChange={() => update({ levels: toggle(levels, value) })}
+                />
+                {label}
+              </label>
+            ))}
+          </div>
+        </div>
+
+        {availableLocations.length > 0 && (
+          <label className="flex flex-col gap-1 text-foreground-muted">
+            Locations
+            <select
+              multiple
+              value={locations}
+              onChange={(e) => update({ locations: [...e.target.selectedOptions].map((o) => o.value) })}
+              className="h-20 min-w-40 rounded border border-accent/30 bg-background px-2 py-1 text-foreground"
+            >
+              {availableLocations.map((loc) => (
+                <option key={loc} value={loc}>
+                  {loc}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
 
-      <ul className="flex flex-col gap-3">
+      <div className="flex flex-col gap-2">
         {filtered.map((job) => (
-          <li
-            key={job.id}
-            className="flex items-center justify-between gap-4 rounded border border-accent/20 bg-surface p-3"
-          >
-            <div>
-              <a
-                href={job.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-medium text-foreground hover:underline"
-              >
-                {job.title}
-              </a>
-              <div className="text-sm text-foreground-muted">
-                {job.company} · {job.location ?? "remote/unspecified"} · posted {formatDate(job.postedAt)}
-                {job.score !== null && <> · match {job.score}</>}
-              </div>
-            </div>
-            <StatusEditor
-              jobId={job.id}
-              status={job.status}
-            />
-          </li>
+          <RecommendationCard key={job.id} job={job} />
         ))}
         {filtered.length === 0 && (
           <p className="text-foreground-muted">
             {jobs.length === 0 ? "No new jobs — run the ingest script." : "No jobs match these filters."}
           </p>
         )}
-      </ul>
+      </div>
     </div>
   );
 }

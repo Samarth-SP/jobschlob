@@ -1,5 +1,7 @@
 export type DashboardFilters = {
   minScore?: number;
-  location?: string;
+  locations?: string[];
   company?: string;
+  categories?: string[];
+  levels?: string[];
 };

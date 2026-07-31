@@ -1,42 +1,42 @@
-import Anthropic from "@anthropic-ai/sdk";
+// Keyword-overlap compatibility scoring — no LLM. This runs once per (job, user) pair on every
+// ingest, so at the scale the Simplify feeds add (thousands of jobs) an LLM call per pair is both
+// slow (hours, sequential) and a real ongoing cost for a score that's advisory at best. The LLM
+// budget is reserved for the resume/cover-letter workshop (lib/resume-scaffold.ts), where a
+// generated document actually benefits from real language understanding.
+const STOPWORDS = new Set([
+  "a", "an", "the", "and", "or", "but", "of", "in", "on", "at", "to", "for", "with", "by", "from",
+  "is", "are", "was", "were", "be", "been", "being", "as", "it", "this", "that", "these", "those",
+  "i", "my", "me", "we", "our", "you", "your", "he", "she", "they", "them", "their",
+  "have", "has", "had", "do", "does", "did", "will", "would", "can", "could", "should",
+  "not", "no", "so", "than", "then", "also", "into", "about", "over", "up", "out",
+]);
 
-const client = new Anthropic();
+// Keeps tech-ish tokens like "c++", "c#", "node.js" intact instead of splitting on every symbol.
+function tokenize(text: string): Set<string> {
+  const words = text
+    .toLowerCase()
+    .replace(/[^a-z0-9+#. ]+/g, " ")
+    .split(/\s+/)
+    .map((w) => w.replace(/^\.+|\.+$/g, ""))
+    .filter((w) => w.length > 1 && !STOPWORDS.has(w));
+  return new Set(words);
+}
 
-const SCHEMA = {
-  type: "object" as const,
-  properties: {
-    score: { type: "integer" as const, description: "Compatibility 0-100" },
-    rationale: { type: "string" as const, description: "One sentence explaining the score" },
-  },
-  required: ["score", "rationale"],
-  additionalProperties: false,
-};
-
-// Bulk, cheap scoring — called once per (job, user) pair from the ingest script. Returns null
-// on any failure so the caller can skip and retry next run rather than blocking the whole batch.
-export async function scoreJobForUser(
-  job: { title: string; company: string; location: string | null },
+export function scoreJobForUser(
+  job: { title: string; company: string },
   background: string,
-): Promise<{ score: number; rationale: string } | null> {
-  try {
-    const response = await client.messages.create({
-      model: "claude-haiku-4-5",
-      max_tokens: 300,
-      output_config: { format: { type: "json_schema", schema: SCHEMA } },
-      messages: [
-        {
-          role: "user",
-          content: `Background:\n${background}\n\nJob: ${job.title} at ${job.company}${job.location ? ` (${job.location})` : ""}\n\nScore how well this job matches the background, 0-100.`,
-        },
-      ],
-    });
+): { score: number; rationale: string } | null {
+  const profileTokens = tokenize(background);
+  if (profileTokens.size === 0) return null;
 
-    const block = response.content.find((b) => b.type === "text");
-    if (!block || block.type !== "text") return null;
-    const parsed = JSON.parse(block.text);
-    if (typeof parsed.score !== "number" || typeof parsed.rationale !== "string") return null;
-    return { score: parsed.score, rationale: parsed.rationale };
-  } catch {
-    return null;
-  }
+  const jobTokens = tokenize(`${job.title} ${job.company}`);
+  if (jobTokens.size === 0) return null;
+
+  const matched = [...jobTokens].filter((t) => profileTokens.has(t));
+  const score = Math.round((matched.length / jobTokens.size) * 100);
+  const rationale = matched.length
+    ? `Matched keywords: ${matched.join(", ")}`
+    : "No keyword overlap with background.";
+
+  return { score, rationale };
 }

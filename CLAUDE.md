@@ -2,7 +2,7 @@
 
 # jobschlob
 
-Job dashboard for 2 users: an LLM-scored compatibility feed, per-user application tracking with
+Job dashboard for 2 users: a keyword-scored compatibility feed, per-user application tracking with
 full status history, an analytics page, and a resume/cover-letter workshop that scaffolds a
 plain-text background corpus into LaTeX, compiles it to a real PDF, and self-checks ATS
 parseability. One repo: frontend, API, schema, and ingest script share types and one Drizzle
@@ -11,33 +11,40 @@ schema.
 ## Status / pick up here next session
 
 **Open issue:** the ASCII scene art on the landing page (`src/components/SceneArt.tsx`,
-`src/lib/scene-ascii.ts`) — converted from a user-provided reference doodle (frog roasting a
-marshmallow by a campfire, plus a tent) — didn't come out looking right once deployed. The
-conversion pipeline: `npx asciify-image` was tried first and turned out to have a broken
-darkness-mapping bug (rendered the image almost solid black despite the source being a light
-background with thin lines — verified by reading raw pixel values directly with Jimp, which came
-back correctly light, e.g. `{r:253,g:251,b:248}` at the background). Replaced with a hand-rolled
-converter: for each output character cell, take the **minimum** luminance across the corresponding
-source-pixel block (preserves thin lines that plain box-averaging washes into faint gray noise),
-then **binarize** with a threshold (space vs `#`) rather than a multi-level gradient, since the
-source is flat line-art with no real shading — a gradient just picked up anti-aliasing noise
-around the edges. Current params: 160 output columns, `charAspect = 0.5`, `threshold = 200`,
-trimmed to a tight bounding box. The reference PNG is still sitting untracked at the project root
-(`ChatGPT Image Jul 29, 2026 at 10_36_33 PM.png` — gitignored/not committed, it's a reference
-file not a build asset) if it needs reprocessing. Likely next steps to try: different threshold,
-higher column count for more fidelity, or hand-touching-up the generated art directly rather than
-re-deriving it from the image.
+`src/lib/scene-ascii.ts`) still looks wrong (slanted/"italicized", low detail). Two conversion
+attempts this session (pixel-thresholding via Jimp with a corrected block-aspect-ratio, then a
+hand-drawn vector version built from explicit line-coordinate primitives to sidestep aliasing
+entirely) both got reverted at the user's request — **the file is back to the original
+pixel-sampled version** (160 cols, `charAspect = 0.5`, `threshold = 200`) so the user can
+troubleshoot it offline. The reference PNG is still sitting untracked at the project root
+(`ChatGPT Image Jul 29, 2026 at 10_36_33 PM.png` — gitignored, reference file not a build asset).
+Don't re-attempt this without the user asking.
 
-**Not yet visually verified by Claude** (no browser tool available all session — every check below
-was done via `curl`, direct function calls against the real DB/API, and `npm run build`, never an
-actual rendered page): the theme switcher across all 6 presets, the workshop's PDF preview/ATS
-banner, the analytics Sankey chart's actual layout/legibility, the dashboard filter inputs, and the
-nav logo fade-in timing. Worth a real click-through pass.
+**Not yet visually verified by Claude** (no browser tool available, declined this session): the
+theme switcher across all 6 presets, the workshop's PDF preview/ATS banner, the analytics Sankey
+chart's layout/legibility, the nav logo fade-in timing, and — new this session — the dashboard's
+multi-select location/category/level filter UI (`NewJobsSection.tsx`). Everything was checked via
+`curl`, direct function calls against the real DB, `npm run build`, and `tsc --noEmit` only. Worth
+a real click-through pass, especially the new filters.
+
+**This session's other major change:** the ingestion pipeline went from one hardcoded Greenhouse
+company (`asana`) to multiple sources with entry-level filtering, and job-compatibility scoring
+was switched from an LLM call to local keyword matching — see Ingest and Scoring below, both
+rewritten. A near-miss during cleanup is worth remembering: a `where(isNull(...) && notInArray(...))`
+call used JS `&&` instead of Drizzle's `and()`, which silently drops all but the last condition —
+it deleted 4,358 job rows (everything except the 3 tracked ones) before being caught and fully
+recovered (job IDs are deterministic hashes, so re-running ingest regenerated everything
+byte-identical). **Always use Drizzle's `and()`/`or()` to combine query conditions, never JS
+`&&`/`||`.**
 
 ## Schema (`src/db/schema.ts`)
 
 - `jobs` — the shared board. Not user-scoped. `id` is a dedupe hash (`lib/dedupe.ts`) of
   source+external-id, so re-ingesting the same posting updates it instead of duplicating it.
+  `category` (`tech | consulting | vc_pe`) and `level` (`internship | new_grad`) are set per source
+  in `scripts/ingest.ts` — see Ingest below. Both nullable: a handful of pre-existing tracked jobs
+  from before these columns existed still have `null` in both and are deliberately left alone
+  (never delete/backfill a tracked job's row out from under a user's application history).
 - `trackedJobs` — per-user status (`interested | applied | heard_back | oa | interview | offer |
   rejected | ghosted | archived`) + notes on a job. `(userId, jobId)` unique. Current status only
   — `applicationEvents` is the history.
@@ -49,9 +56,9 @@ nav logo fade-in timing. Worth a real click-through pass.
   workshop both work from) plus a `filters` jsonb column (`DashboardFilters` — min match score,
   location, company substring — see `src/lib/dashboard-filters.ts`) persisting the dashboard's
   new-jobs filter UI across visits.
-- `jobMatches` — per-user, per-job LLM compatibility score + rationale, `(userId, jobId)` unique.
-  Populated in bulk by `scripts/ingest.ts` (scores newly-seen jobs against every user with a
-  profile) — the dashboard never makes a live LLM call to render the ranked feed.
+- `jobMatches` — per-user, per-job keyword-overlap compatibility score + rationale, `(userId,
+  jobId)` unique. Populated in bulk by `scripts/ingest.ts` (scores newly-seen jobs against every
+  user with a profile) — no LLM involved, see Scoring below.
 - `documents` — saved resume/cover-letter LaTeX source (not the PDF — PDFs are cheap to recompile
   on demand via `lib/latex.ts`, so there's no Vercel Blob dependency). `jobId` nullable: a
   document can be general-purpose or tailored to one job. `atsNotes` is
@@ -74,10 +81,20 @@ called from `scripts/ingest.ts` — jobs aren't user-scoped so there's no userId
 
 ## Scoring
 
-`src/lib/match.ts` (`scoreJobForUser`) — LLM compatibility scoring (Claude Haiku, constrained JSON
-schema) against `profiles.background`. Called from `scripts/ingest.ts` for every newly-seen job ×
-every profiled user, skipping jobs that already have a match so a daily re-upsert doesn't re-bill.
-Writes `jobMatches`. `getRankedBoard()` in queries.ts sorts by `jobMatches.score DESC NULLS LAST`.
+`src/lib/match.ts` (`scoreJobForUser`) — pure keyword-overlap compatibility scoring, no LLM
+involved and fully synchronous. Tokenizes `profiles.background` and the job's `title`+`company`
+(lowercased, stopwords stripped, tech-ish tokens like `c++`/`node.js` kept intact), scores as
+`(matched tokens / job's own token count) * 100`, and returns a `rationale` string listing which
+keywords matched. Called from `scripts/ingest.ts` for every newly-seen job × every profiled user,
+skipping jobs that already have a match. Writes `jobMatches`. `getRankedBoard()` in queries.ts
+sorts by `jobMatches.score DESC NULLS LAST`.
+
+This used to be an LLM call (Claude Haiku, constrained JSON schema) but got switched to keyword
+matching once the ingest sources grew from one company to thousands of jobs (see Ingest below) —
+thousands of sequential LLM calls per ingest run was both slow (~1.5hr for the first backfill) and
+a real ongoing cost for a score that's advisory at best. **The LLM budget is reserved for the
+resume/cover-letter workshop** (`lib/resume-scaffold.ts`, still Claude Sonnet) — that's the one
+place in this app where generation quality actually depends on real language understanding.
 
 ## LaTeX / PDF pipeline
 
@@ -148,9 +165,15 @@ or revisiting stages.
 ## Dashboard filters
 
 `/dashboard`'s new-jobs list (`NewJobsSection.tsx`, client component) filters in-memory (instant,
-no round trip) by min match score / location / company, and debounce-persists the filter values to
+no round trip) by min match score, company substring, and multi-select **locations**,
+**categories** (tech/consulting/vc_pe), and **levels** (internship/new_grad) — see
+`src/lib/dashboard-filters.ts` for the `DashboardFilters` shape. Locations are a native `<select
+multiple>` populated from whatever distinct `job.location` values are actually present in the
+current job list (no separate query, no hardcoded location list); category/level are checkbox
+groups off the fixed enums. An empty selection for any of the three means "no filter" (same
+convention as the pre-existing minScore/company fields). Filter values debounce-persist to
 `profiles.filters` via `POST /api/dashboard/filters` so they're there on the next visit. Every
-posting shows posted date, company, location, and match score.
+posting shows posted date, company, location, level, category, and match score.
 
 ## Migrations
 
@@ -166,22 +189,54 @@ Never auto-run on deploy.
 4. Only then push the app code that depends on the new schema.
 
 Migrations so far: `0000` initial (jobs/trackedJobs/preferences), `0001` v2 tables (profiles/
-jobMatches/applicationEvents/documents), `0002` drop `preferences`, `0003` add `profiles.filters`.
+jobMatches/applicationEvents/documents), `0002` drop `preferences`, `0003` add `profiles.filters`,
+`0004` add `jobs.category`/`jobs.level`.
 
 ## Env vars
 
 See `.env.example`. `DATABASE_URL` is the pooled Neon connection (app runtime + ingest).
-`DIRECT_DATABASE_URL` is the non-pooled one (migrations only). `ANTHROPIC_API_KEY` powers match
-scoring + the workshop. All three go in GitHub repo secrets (ingest/migrate workflows) *and*
+`DIRECT_DATABASE_URL` is the non-pooled one (migrations only). `ANTHROPIC_API_KEY` powers the
+workshop only (`lib/resume-scaffold.ts`) — ingest's job-match scoring is local keyword matching,
+no LLM/API key needed, see Scoring above. All three go in GitHub repo secrets (ingest/migrate
+workflows) *and*
 Vercel env vars (production + preview); everything else (`AUTH_SECRET`, `AUTH_GITHUB_ID/SECRET`,
 `ALLOWED_EMAILS`) is Vercel-only.
 
 ## Ingest
 
-`scripts/ingest.ts` runs standalone via `tsx` (no Next.js import), on a GitHub Actions cron
-(`.github/workflows/ingest.yml`) and via `workflow_dispatch`. It also prunes `jobs` rows older
-than 60 days that have no `trackedJobs` referencing them, and scores new jobs against every
-profiled user (see Scoring above).
+`scripts/ingest.ts` runs standalone via `tsx` (no Next.js import; local runs need env vars
+exported from `.env` manually, e.g. `set -a; source .env; set +a`), on a GitHub Actions cron
+(`.github/workflows/ingest.yml`, weekdays 13:00 UTC) and via `workflow_dispatch`. It also prunes
+`jobs` rows older than 60 days that have no `trackedJobs` referencing them, and scores new jobs
+against every profiled user (see Scoring above).
+
+Two kinds of sources, both entry-level only:
+
+- **Greenhouse boards** (`GREENHOUSE_BOARDS` in ingest.ts) — `boards-api.greenhouse.io/v1/boards/
+  {slug}/jobs`, no auth. Each board lists every seniority mixed together, so every posting is run
+  through `src/lib/level-heuristic.ts` (`classifyLevel`) and dropped unless the title reads as
+  internship/new-grad (title regex, biased toward false negatives — see the file's own comment for
+  the tradeoff and upgrade path). Currently: `asana` (tech), `alixpartners` (consulting), `a16z`
+  and `generalcatalyst` (vc_pe). **Slugs were verified live one at a time against each company's
+  real careers page before adding — a board 200ing is not proof it's the right company**
+  (`boards-api.greenhouse.io/v1/boards/bcg/jobs` resolves and returns real-looking jobs, but it is
+  not Boston Consulting Group). Don't add a slug without checking it actually belongs to who you
+  think it does.
+- **SimplifyJobs feeds** (`SIMPLIFY_FEEDS`) — `raw.githubusercontent.com/SimplifyJobs/
+  {Summer2027-Internships,New-Grad-Positions}/dev/.github/scripts/listings.json`, community-
+  maintained JSON aggregating hundreds of companies' tech internship/new-grad postings, updated
+  hourly. Level is implicit in which feed a listing came from, so nothing here needs
+  `classifyLevel`. Filter to `active: true` — most entries in the raw feed are historical/closed.
+
+Sources considered and deliberately skipped for now (see conversation history if picking this back
+up): `jobright-ai`'s consulting-internship GitHub repos (README-table only, affiliate redirect
+links instead of the original posting URL, only last 7 days shown — lower quality than the above)
+and JobSpy-style LinkedIn/Indeed keyword scraping for VC/PE roles (best coverage for that vertical,
+but real ToS/blocking risk and scraper fragility). VC/PE coverage stays thin without one of these.
+
+**Scale note:** the SimplifyJobs feeds alone are ~4,200 active entries, so `upsertJobs` batches
+inserts (`UPSERT_BATCH_SIZE = 500` in queries.ts) — a single multi-thousand-row insert over Neon's
+HTTP driver fails outright.
 
 ## Routes
 

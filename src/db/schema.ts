@@ -7,6 +7,8 @@ export const jobs = pgTable("jobs", {
   location: text("location"),
   url: text("url").notNull(),
   source: text("source").notNull(), // e.g. "greenhouse:acme"
+  category: text("category"), // 'tech' | 'consulting' | 'vc_pe' — set per source in scripts/ingest.ts
+  level: text("level"), // 'internship' | 'new_grad' — see lib/level-heuristic.ts
   postedAt: timestamp("posted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });

@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { auth } from "@/lib/auth";
-import { getRankedBoard, getTrackedJobs, getAvgMatchScore, getFilters } from "@/db/queries";
-import { StatusEditor } from "@/components/StatusEditor";
+import { getRankedBoard, getTrackedJobsWithHistory, getAvgMatchScore, getFilters, getProfile } from "@/db/queries";
 import { NewJobsSection } from "@/components/NewJobsSection";
+import { ProfileCard } from "@/components/ProfileCard";
+import { StatTiles } from "@/components/StatTiles";
+import { TrackedApplications } from "@/components/TrackedApplications";
 
 export default async function DashboardPage() {
   const session = await auth();
@@ -11,62 +13,63 @@ export default async function DashboardPage() {
   }
   const userId = session.user.email;
 
-  const [board, tracked, avgMatch, filters] = await Promise.all([
+  const [board, tracked, avgMatch, filters, background] = await Promise.all([
     getRankedBoard(userId),
-    getTrackedJobs(userId),
+    getTrackedJobsWithHistory(userId),
     getAvgMatchScore(userId),
     getFilters(userId),
+    getProfile(userId),
   ]);
 
   const newJobs = board.filter((job) => !job.status);
+  const greetingName = userId.split("@")[0];
 
   return (
-    <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-8 px-6 py-8">
-      <Link
-        href="/analytics"
-        className="flex items-center justify-between rounded border border-accent/20 bg-pop-tint px-4 py-3 transition-colors hover:border-pop"
-      >
+    <main className="mx-auto flex w-full max-w-5xl flex-1 flex-col gap-6 px-6 py-8">
+      <div className="flex items-baseline justify-between gap-4">
         <div>
-          <div className="text-sm text-foreground-muted">Average match score</div>
-          <div className="text-2xl font-semibold text-foreground">
-            {avgMatch.overall !== null ? Math.round(avgMatch.overall) : "—"}
-            <span className="text-sm font-normal text-foreground-muted"> / 100</span>
-          </div>
+          <p className="mb-1 text-xs font-medium uppercase tracking-widest text-foreground-muted/70">
+            {new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
+          </p>
+          <h1 className="text-2xl font-semibold text-pop">Welcome back, {greetingName}.</h1>
         </div>
-        <span className="text-sm text-pop">View analytics →</span>
-      </Link>
+        <Link href="/analytics" className="shrink-0 text-sm text-pop hover:underline">
+          View analytics →
+        </Link>
+      </div>
 
-      <section className="flex flex-col gap-3">
-        <h1 className="text-xl font-semibold text-pop">New jobs</h1>
-        <NewJobsSection jobs={newJobs} initialFilters={filters} />
-      </section>
+      <div className="grid grid-cols-1 gap-6 lg:grid-cols-[300px_1fr]">
+        <div className="flex flex-col gap-4">
+          <ProfileCard email={userId} background={background} />
+          <StatTiles tracked={tracked} />
+          {avgMatch.overall !== null && (
+            <div className="rounded-xl border border-accent/15 bg-pop-tint p-4">
+              <p className="mb-1 text-[10px] font-medium uppercase tracking-widest text-foreground-muted/70">
+                Avg match score
+              </p>
+              <p className="text-2xl font-semibold text-foreground">
+                {Math.round(avgMatch.overall)}
+                <span className="text-sm font-normal text-foreground-muted"> / 100</span>
+              </p>
+            </div>
+          )}
+        </div>
 
-      <section className="flex flex-col gap-3">
-        <h2 className="text-xl font-semibold text-pop">Tracked</h2>
-        <ul className="flex flex-col gap-3">
-          {tracked.map(({ job, status, notes }) => (
-            <li
-              key={job.id}
-              className="flex items-center justify-between gap-4 rounded border border-accent/20 bg-surface p-3"
-            >
-              <div>
-                <a
-                  href={job.url}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="font-medium text-foreground hover:underline"
-                >
-                  {job.title}
-                </a>
-                <div className="text-sm text-foreground-muted">{job.company}</div>
-                {notes && <div className="text-sm text-foreground-muted">{notes}</div>}
-              </div>
-              <StatusEditor jobId={job.id} status={status} />
-            </li>
-          ))}
-          {tracked.length === 0 && <p className="text-foreground-muted">Nothing tracked yet.</p>}
-        </ul>
-      </section>
+        <div className="flex flex-col gap-8">
+          <section className="flex flex-col gap-3">
+            <h2 className="text-lg font-semibold text-pop">New jobs</h2>
+            <NewJobsSection jobs={newJobs} initialFilters={filters} />
+          </section>
+
+          <section className="flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-pop">Recent applications</h2>
+              <span className="text-sm text-foreground-muted">{tracked.length} total</span>
+            </div>
+            <TrackedApplications items={tracked} />
+          </section>
+        </div>
+      </div>
     </main>
   );
 }
