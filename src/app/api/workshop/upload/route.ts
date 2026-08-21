@@ -46,5 +46,5 @@ export async function POST(req: Request) {
   });
   await setActiveDocument(userId, saved.id);
 
-  return NextResponse.json({ id: saved.id, filename: saved.filename, atsNotes });
+  return NextResponse.json({ id: saved.id, filename: saved.filename, kind, latex: null, atsNotes });
 }

@@ -288,6 +288,22 @@ export async function setActiveDocument(userId: string, id: number) {
   await db.update(documents).set({ active: true }).where(and(eq(documents.id, id), eq(documents.userId, userId)));
 }
 
+// Recompile/rescan write path — updates a document's stored latex/blobUrl/atsNotes in place
+// after the user edits wording (recompile) or just re-runs the ATS check (rescan). Scoped to
+// userId like deleteDocument, for the same reason.
+export async function updateDocumentContent(
+  userId: string,
+  id: number,
+  patch: Partial<Pick<typeof documents.$inferInsert, "latex" | "blobUrl" | "atsNotes">>,
+) {
+  const [updated] = await db
+    .update(documents)
+    .set(patch)
+    .where(and(eq(documents.id, id), eq(documents.userId, userId)))
+    .returning();
+  return updated ?? null;
+}
+
 export async function getDocumentById(userId: string, id: number) {
   const [doc] = await db.select().from(documents).where(and(eq(documents.id, id), eq(documents.userId, userId)));
   return doc ?? null;
