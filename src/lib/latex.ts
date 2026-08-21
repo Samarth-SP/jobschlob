@@ -25,8 +25,16 @@ export async function compileLatex(source: string): Promise<Buffer> {
         env: { ...process.env, TECTONIC_CACHE_DIR: CACHE_DIR },
       });
     } catch (err) {
-      const stderr = err && typeof err === "object" && "stderr" in err ? String(err.stderr) : "";
-      throw new LatexCompileError(stderr.trim() || (err instanceof Error ? err.message : "LaTeX compilation failed."));
+      const stderr = (err && typeof err === "object" && "stderr" in err ? String(err.stderr) : "").trim();
+      // "Read-only file system" here specifically means Tectonic tried to fetch-and-cache a
+      // package that isn't in the pre-warmed .tectonic-cache — normal locally (writable dir,
+      // network available) but the deployed function's bundle is read-only, so this is the
+      // production-only symptom of "this package isn't supported," not a transient failure.
+      // Leading with that in plain language beats making the user parse a raw XeTeX transcript.
+      const prefix = stderr.includes("Read-only file system")
+        ? "This LaTeX uses a package outside jobschlob's supported set (only geometry, fontenc, enumitem, titlesec, xcolor, hyperref, latexsym, fullpage, marvosym, color, verbatim, fancyhdr, babel, tabularx, charter are pre-cached). "
+        : "";
+      throw new LatexCompileError(prefix + (stderr || (err instanceof Error ? err.message : "LaTeX compilation failed.")));
     }
     return await readFile(pdfPath);
   } finally {
