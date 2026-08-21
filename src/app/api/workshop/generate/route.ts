@@ -4,6 +4,7 @@ import { getProfile, getJobById, saveDocument, setActiveDocument } from "@/db/qu
 import { generateResumeLatex, generateCoverLetterLatex } from "@/lib/resume-scaffold";
 import { compileLatex } from "@/lib/latex";
 import { checkAts } from "@/lib/ats-check";
+import { uploadDocumentPdf } from "@/lib/blob-storage";
 
 export const runtime = "nodejs";
 
@@ -31,13 +32,14 @@ export async function POST(req: Request) {
   const pdf = await compileLatex(latex);
   const atsNotes = await checkAts(pdf, kind);
 
-  const saved = await saveDocument({ userId, jobId: job?.id ?? null, kind, source: "generated", latex, atsNotes });
+  // Stored alongside latex (not just recompiled on demand) so a generated document lives in the
+  // document library exactly like an uploaded one — same panel, same viewer, same re-scan path —
+  // instead of being a one-off preview that vanishes once you navigate away.
+  const filename = `${kind === "cover_letter" ? "cover-letter" : "resume"}${job ? `-${job.company}` : ""}.pdf`;
+  const blobUrl = await uploadDocumentPdf(userId, kind, filename, pdf);
+
+  const saved = await saveDocument({ userId, jobId: job?.id ?? null, kind, source: "generated", latex, blobUrl, filename, atsNotes });
   await setActiveDocument(userId, saved.id);
 
-  return NextResponse.json({
-    documentId: saved.id,
-    latex,
-    atsNotes,
-    pdfBase64: pdf.toString("base64"),
-  });
+  return NextResponse.json({ id: saved.id, filename: saved.filename, kind, latex, atsNotes });
 }
