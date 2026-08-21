@@ -1,7 +1,7 @@
 import { ScoreRing } from "@/components/ScoreRing";
 import { StatusEditor } from "@/components/StatusEditor";
 
-const CATEGORY_LABELS: Record<string, string> = { tech: "Tech", consulting: "Consulting", vc_pe: "VC/PE" };
+const CATEGORY_LABELS: Record<string, string> = { tech: "Tech", consulting: "Consulting", vc_pe: "VC/PE", robotics: "Robotics" };
 const LEVEL_LABELS: Record<string, string> = { internship: "Internship", new_grad: "New grad" };
 
 // Our score's rationale is literally "Matched keywords: x, y, z" (see lib/match.ts) — parsing it

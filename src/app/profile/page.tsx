@@ -1,5 +1,7 @@
 import { auth } from "@/lib/auth";
-import { getProfile, setProfile } from "@/db/queries";
+import { getProfile, setProfile, getJobsSince, saveJobMatches } from "@/db/queries";
+import { scoreJobForUser } from "@/lib/match";
+import { BOARD_RETENTION_DAYS } from "@/lib/board-retention";
 import { revalidatePath } from "next/cache";
 
 export default async function ProfilePage() {
@@ -12,8 +14,23 @@ export default async function ProfilePage() {
 
   async function save(formData: FormData) {
     "use server";
-    await setProfile(userId, String(formData.get("background") ?? ""));
+    const background = String(formData.get("background") ?? "");
+    await setProfile(userId, background);
     revalidatePath("/profile");
+
+    // Force re-matching against everything currently on the board — otherwise a rewritten
+    // background leaves every existing jobMatches row stale until ingest happens to re-touch
+    // that job (which, for an already-seen job, it never does; see getMatchedJobIds). jobMatches
+    // is keyed (userId, jobId), so this is a plain upsert, not a delete-then-reinsert.
+    if (!background.trim()) return;
+    const cutoff = new Date(Date.now() - BOARD_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+    const recentJobs = await getJobsSince(cutoff);
+    const matches = recentJobs.flatMap((job) => {
+      const result = scoreJobForUser(job, background);
+      return result ? [{ userId, jobId: job.id, ...result }] : [];
+    });
+    await saveJobMatches(matches);
+    revalidatePath("/dashboard");
   }
 
   return (
