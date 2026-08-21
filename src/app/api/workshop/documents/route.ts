@@ -53,8 +53,8 @@ export async function POST(req: Request) {
   if (body.action === "recompile") {
     const doc = await getDocumentById(userId, id);
     if (!doc) return NextResponse.json({ error: "not found" }, { status: 404 });
-    const latex = typeof body.latex === "string" ? body.latex : doc.latex;
-    if (!latex) return NextResponse.json({ error: "No LaTeX source on this document." }, { status: 400 });
+    const submittedLatex = typeof body.latex === "string" ? body.latex : doc.latex;
+    if (!submittedLatex) return NextResponse.json({ error: "No LaTeX source on this document." }, { status: 400 });
 
     // The most likely way this fails: the user typed plain prose into the editor and it happened
     // to contain a raw &/%/#/_/$ — LaTeX's reserved characters — which Tectonic rejects outright.
@@ -62,9 +62,9 @@ export async function POST(req: Request) {
     // own error text instead of bubbling up as an uncaught 500 with an empty body (which res.json()
     // on the client then fails to parse, surfacing a confusing "invalid JSON"-shaped error instead
     // of the real one).
-    let pdf: Buffer;
+    let pdf: Buffer, latex: string, warnings: string[];
     try {
-      pdf = await compileLatex(latex);
+      ({ pdf, source: latex, warnings } = await compileLatex(submittedLatex));
     } catch (err) {
       if (err instanceof LatexCompileError) return NextResponse.json({ error: err.message }, { status: 422 });
       throw err;
@@ -73,7 +73,7 @@ export async function POST(req: Request) {
     const blobUrl = await uploadDocumentPdf(userId, doc.kind, doc.filename ?? `${doc.kind}.pdf`, pdf);
     if (doc.blobUrl) await deleteDocumentPdf(doc.blobUrl);
     await updateDocumentContent(userId, id, { latex, blobUrl, atsNotes });
-    return NextResponse.json({ ok: true, atsNotes });
+    return NextResponse.json({ ok: true, atsNotes, latex, warnings });
   }
 
   // Re-run the ATS check against whatever PDF is currently stored, without changing it — mainly
