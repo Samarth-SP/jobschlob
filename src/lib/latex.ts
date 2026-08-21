@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile, rm, cp, access } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -7,7 +7,24 @@ import { promisify } from "node:util";
 const execFileAsync = promisify(execFile);
 
 const BIN_PATH = join(process.cwd(), "bin", "tectonic");
-const CACHE_DIR = join(process.cwd(), ".tectonic-cache");
+// The build-time-warmed cache, shipped read-only with the deployed function (see
+// scripts/setup-tectonic.js) — covers our house style plus the common external packages in
+// scripts/fixture.tex with zero network access.
+const BAKED_CACHE_DIR = join(process.cwd(), ".tectonic-cache");
+// /tmp is the one writable path in a deployed Vercel function. Copying the baked cache here
+// once per container gives Tectonic a cache dir it can actually write into, so a package outside
+// the warmed set falls through to Tectonic's normal live fetch-and-cache instead of crashing on
+// "Read-only file system" trying to write into .tectonic-cache directly. First request per cold
+// container pays a local disk copy (fast) plus, only for genuinely uncommon packages, a live
+// fetch; every request after that on the same warm container (Fluid Compute reuses them) hits an
+// already-populated cache — for the curated set as well as anything fetched live since.
+const RUNTIME_CACHE_DIR = join(tmpdir(), "tectonic-cache");
+
+let cacheReady: Promise<void> | null = null;
+function ensureRuntimeCache(): Promise<void> {
+  cacheReady ??= access(RUNTIME_CACHE_DIR).catch(() => cp(BAKED_CACHE_DIR, RUNTIME_CACHE_DIR, { recursive: true }));
+  return cacheReady;
+}
 
 // Carries Tectonic's own stderr (the actual LaTeX error — "Undefined control sequence", an
 // unescaped &/%/#/_, etc.) so callers can show something more useful than "compile failed". Its
@@ -15,6 +32,7 @@ const CACHE_DIR = join(process.cwd(), ".tectonic-cache");
 export class LatexCompileError extends Error {}
 
 export async function compileLatex(source: string): Promise<Buffer> {
+  await ensureRuntimeCache();
   const dir = await mkdtemp(join(tmpdir(), "latex-"));
   const texPath = join(dir, "doc.tex");
   const pdfPath = join(dir, "doc.pdf");
@@ -22,19 +40,11 @@ export async function compileLatex(source: string): Promise<Buffer> {
     await writeFile(texPath, source);
     try {
       await execFileAsync(BIN_PATH, ["--outdir", dir, texPath], {
-        env: { ...process.env, TECTONIC_CACHE_DIR: CACHE_DIR },
+        env: { ...process.env, TECTONIC_CACHE_DIR: RUNTIME_CACHE_DIR },
       });
     } catch (err) {
       const stderr = (err && typeof err === "object" && "stderr" in err ? String(err.stderr) : "").trim();
-      // "Read-only file system" here specifically means Tectonic tried to fetch-and-cache a
-      // package that isn't in the pre-warmed .tectonic-cache — normal locally (writable dir,
-      // network available) but the deployed function's bundle is read-only, so this is the
-      // production-only symptom of "this package isn't supported," not a transient failure.
-      // Leading with that in plain language beats making the user parse a raw XeTeX transcript.
-      const prefix = stderr.includes("Read-only file system")
-        ? "This LaTeX uses a package outside jobschlob's supported set (only geometry, fontenc, enumitem, titlesec, xcolor, hyperref, latexsym, fullpage, marvosym, color, verbatim, fancyhdr, babel, tabularx, charter are pre-cached). "
-        : "";
-      throw new LatexCompileError(prefix + (stderr || (err instanceof Error ? err.message : "LaTeX compilation failed.")));
+      throw new LatexCompileError(stderr || (err instanceof Error ? err.message : "LaTeX compilation failed."));
     }
     return await readFile(pdfPath);
   } finally {
