@@ -24,7 +24,7 @@ export async function POST(req: Request) {
 
   const job = jobId ? await getJobById(jobId) : null;
 
-  const latex =
+  const generatedLatex =
     kind === "cover_letter"
       ? await generateCoverLetterLatex(background, job ? { title: job.title, company: job.company } : { title: "the role", company: "the company" })
       : await generateResumeLatex(background, job ? `${job.title} at ${job.company}` : undefined);
@@ -32,9 +32,9 @@ export async function POST(req: Request) {
   // The LLM's own output is well-behaved almost always (it's prompted with a working exemplar),
   // but not guaranteed — same clean-error treatment as the recompile path rather than an uncaught
   // 500 with an empty body.
-  let pdf: Buffer;
+  let pdf: Buffer, latex: string, warnings: string[];
   try {
-    pdf = await compileLatex(latex);
+    ({ pdf, source: latex, warnings } = await compileLatex(generatedLatex));
   } catch (err) {
     if (err instanceof LatexCompileError) return NextResponse.json({ error: `Generation produced invalid LaTeX: ${err.message}` }, { status: 502 });
     throw err;
@@ -50,5 +50,5 @@ export async function POST(req: Request) {
   const saved = await saveDocument({ userId, jobId: job?.id ?? null, kind, source: "generated", latex, blobUrl, filename, atsNotes });
   await setActiveDocument(userId, saved.id);
 
-  return NextResponse.json({ id: saved.id, filename: saved.filename, kind, latex, atsNotes });
+  return NextResponse.json({ id: saved.id, filename: saved.filename, kind, latex, atsNotes, warnings });
 }

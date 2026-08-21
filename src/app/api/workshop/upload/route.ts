@@ -32,20 +32,22 @@ export async function POST(req: Request) {
   }
 
   const job = jobId ? await getJobById(jobId) : null;
-  const latex = await texFile.text();
+  let latex = await texFile.text();
   const filename = pdfFile instanceof File ? pdfFile.name : texFile.name.replace(/\.tex$/i, ".pdf");
 
   let pdf: Buffer;
+  let warnings: string[] = [];
   if (pdfFile instanceof File) {
     pdf = Buffer.from(await pdfFile.arrayBuffer());
   } else {
     // compileLatex's Tectonic cache is warmed only for the small package set our own templates
     // use (see lib/resume-scaffold.ts's ALLOWED_PACKAGES) — an arbitrary external .tex (a
-    // different Overleaf template, say) can easily use packages outside that set, or even
-    // engine-specific primitives Tectonic's default engine doesn't support at all. That's a real
-    // compile failure, not a bug to swallow — tell the user plainly instead of a raw 500.
+    // different Overleaf template, say) can easily use packages outside that set (falls through
+    // to a live fetch, see lib/latex.ts) or even engine-specific primitives Tectonic's default
+    // engine doesn't support at all (auto-stripped, also see lib/latex.ts). A genuine remaining
+    // compile failure isn't a bug to swallow — tell the user plainly instead of a raw 500.
     try {
-      pdf = await compileLatex(latex);
+      ({ pdf, source: latex, warnings } = await compileLatex(latex));
     } catch (err) {
       const detail = err instanceof LatexCompileError ? err.message : "unsupported package or command";
       return NextResponse.json(
@@ -76,5 +78,5 @@ export async function POST(req: Request) {
   });
   await setActiveDocument(userId, saved.id);
 
-  return NextResponse.json({ id: saved.id, filename: saved.filename, kind, latex, atsNotes });
+  return NextResponse.json({ id: saved.id, filename: saved.filename, kind, latex, atsNotes, warnings });
 }

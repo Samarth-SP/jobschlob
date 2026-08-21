@@ -31,13 +31,46 @@ function ensureRuntimeCache(): Promise<void> {
 // own type lets a route handler tell "your LaTeX is broken" apart from an unrelated crash.
 export class LatexCompileError extends Error {}
 
-export async function compileLatex(source: string): Promise<Buffer> {
+// \pdfglyphtounicode / \pdfgentounicode / \input{glyphtounicode} are pdfTeX-only primitives for
+// mapping font glyphs to Unicode (a text-searchability nicety for the compiled PDF) — Tectonic's
+// engine is XeTeX-based and doesn't implement them at all, confirmed by trying to even pre-cache
+// the file that defines them, which crashes on load regardless of caching (see git history on
+// scripts/fixture.tex). No amount of package-caching fixes this; it's a hard engine limitation.
+// Extremely common in "Jake's Resume" (and forks) — the most-used free LaTeX resume template —
+// so rather than making every uploader manually delete these lines, strip them automatically:
+// the rest of the document compiles fine without them, just without that one PDF-searchability
+// trick (our own ATS check re-extracts text from the compiled PDF regardless, so this doesn't
+// weaken the ATS check itself).
+const UNSUPPORTED_PRIMITIVE_LINES = [
+  { pattern: /^.*\\input\{glyphtounicode\}.*$\n?/m, label: "\\input{glyphtounicode}" },
+  { pattern: /^.*\\pdfgentounicode\s*=\s*1.*$\n?/m, label: "\\pdfgentounicode=1" },
+  { pattern: /^.*\\pdfglyphtounicode\{[^}]*\}\{[^}]*\}.*$\n?/gm, label: "\\pdfglyphtounicode{...}{...}" },
+];
+
+export function stripUnsupportedPrimitives(source: string): { source: string; stripped: string[] } {
+  const stripped: string[] = [];
+  let next = source;
+  for (const { pattern, label } of UNSUPPORTED_PRIMITIVE_LINES) {
+    if (pattern.test(next)) {
+      stripped.push(label);
+      next = next.replace(pattern, "");
+    }
+  }
+  return { source: next, stripped };
+}
+
+export async function compileLatex(source: string): Promise<{ pdf: Buffer; source: string; warnings: string[] }> {
   await ensureRuntimeCache();
+  const { source: cleaned, stripped } = stripUnsupportedPrimitives(source);
+  const warnings = stripped.length
+    ? [`Removed unsupported LaTeX (pdfTeX-only, not implemented by our engine): ${stripped.join(", ")}`]
+    : [];
+
   const dir = await mkdtemp(join(tmpdir(), "latex-"));
   const texPath = join(dir, "doc.tex");
   const pdfPath = join(dir, "doc.pdf");
   try {
-    await writeFile(texPath, source);
+    await writeFile(texPath, cleaned);
     try {
       await execFileAsync(BIN_PATH, ["--outdir", dir, texPath], {
         env: { ...process.env, TECTONIC_CACHE_DIR: RUNTIME_CACHE_DIR },
@@ -46,7 +79,8 @@ export async function compileLatex(source: string): Promise<Buffer> {
       const stderr = (err && typeof err === "object" && "stderr" in err ? String(err.stderr) : "").trim();
       throw new LatexCompileError(stderr || (err instanceof Error ? err.message : "LaTeX compilation failed."));
     }
-    return await readFile(pdfPath);
+    const pdf = await readFile(pdfPath);
+    return { pdf, source: cleaned, warnings };
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

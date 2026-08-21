@@ -25,6 +25,10 @@ function asAtsNotes(value: unknown): AtsNotes {
   return (value as AtsNotes) ?? null;
 }
 
+function warningsText(warnings: unknown): string | null {
+  return Array.isArray(warnings) && warnings.length ? warnings.join(" ") : null;
+}
+
 async function postAction(id: number, action: string, extra?: Record<string, unknown>) {
   const res = await fetch("/api/workshop/documents", {
     method: "POST",
@@ -49,6 +53,7 @@ export function WorkshopDashboard({
   const [generating, setGenerating] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [openId, setOpenId] = useState<number | null>(null);
   const [busyIds, setBusyIds] = useState<Set<number>>(new Set());
   const [pdfReloadToken, setPdfReloadToken] = useState(0);
@@ -95,6 +100,7 @@ export function WorkshopDashboard({
   async function generate() {
     setGenerating(true);
     setError(null);
+    setNotice(null);
     try {
       const res = await fetch("/api/workshop/generate", {
         method: "POST",
@@ -114,6 +120,7 @@ export function WorkshopDashboard({
         atsNotes: data.atsNotes,
         createdAt: new Date(),
       });
+      setNotice(warningsText(data.warnings));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Generation failed");
     } finally {
@@ -132,6 +139,7 @@ export function WorkshopDashboard({
     }
     setUploading(true);
     setError(null);
+    setNotice(null);
     try {
       const form = new FormData();
       form.append("tex", texFile);
@@ -153,6 +161,7 @@ export function WorkshopDashboard({
         atsNotes: data.atsNotes,
         createdAt: new Date(),
       });
+      setNotice(warningsText(data.warnings));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Upload failed");
     } finally {
@@ -191,12 +200,18 @@ export function WorkshopDashboard({
   async function recompile(id: number, latex: string) {
     if (recompileTimer.current) clearTimeout(recompileTimer.current);
     setError(null);
+    setNotice(null);
     setBusy(id, true);
     try {
       const data = await postAction(id, "recompile", { latex });
-      setDocs((prev) => prev.map((d) => (d.id === id ? { ...d, latex, atsNotes: data.atsNotes } : d)));
+      // data.latex is the CLEANED source (unsupported primitives auto-stripped server-side, see
+      // lib/latex.ts) — store and show that, not what was sent, so the editor never silently
+      // diverges from what's actually compiled.
+      setDocs((prev) => prev.map((d) => (d.id === id ? { ...d, latex: data.latex, atsNotes: data.atsNotes } : d)));
+      setDraftLatex(data.latex);
       setPdfReloadToken((t) => t + 1);
       setDirty(false);
+      setNotice(warningsText(data.warnings));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Recompile failed");
     } finally {
@@ -270,6 +285,14 @@ export function WorkshopDashboard({
         <div className="fixed left-1/2 top-4 z-[60] -translate-x-1/2 rounded border border-red-700/40 bg-red-50 px-4 py-2 text-sm text-red-800 shadow-lg">
           {error}
           <button onClick={() => setError(null)} className="ml-3 underline">
+            Dismiss
+          </button>
+        </div>
+      )}
+      {!error && notice && (
+        <div className="fixed left-1/2 top-4 z-[60] -translate-x-1/2 rounded border border-accent/40 bg-pop-tint px-4 py-2 text-sm text-foreground shadow-lg">
+          {notice}
+          <button onClick={() => setNotice(null)} className="ml-3 underline">
             Dismiss
           </button>
         </div>
