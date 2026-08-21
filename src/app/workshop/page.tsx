@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { auth } from "@/lib/auth";
-import { getTrackedJobs, getProfile } from "@/db/queries";
+import { getTrackedJobs, getProfile, getDocuments } from "@/db/queries";
 import { WorkshopForm } from "@/components/WorkshopForm";
+import { DocumentLibrary } from "@/components/DocumentLibrary";
 
 export default async function WorkshopPage() {
   const session = await auth();
@@ -9,7 +10,11 @@ export default async function WorkshopPage() {
     return <main className="p-6">Sign in to use the workshop.</main>;
   }
   const userId = session.user.email;
-  const [tracked, background] = await Promise.all([getTrackedJobs(userId), getProfile(userId)]);
+  const [tracked, background, documents] = await Promise.all([
+    getTrackedJobs(userId),
+    getProfile(userId),
+    getDocuments(userId),
+  ]);
 
   if (!background.trim()) {
     return (
@@ -34,6 +39,11 @@ export default async function WorkshopPage() {
         and checks that the text extracts cleanly — the same way an ATS would read it.
       </p>
       <WorkshopForm jobs={tracked.map(({ job }) => ({ id: job.id, title: job.title, company: job.company }))} />
+      <hr className="border-accent/20" />
+      <DocumentLibrary
+        initialDocuments={documents}
+        jobs={tracked.map(({ job }) => ({ id: job.id, title: job.title, company: job.company }))}
+      />
     </main>
   );
 }

@@ -99,60 +99,62 @@ export function NewJobsSection({ jobs, initialFilters }: { jobs: Job[]; initialF
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-start gap-4 text-sm">
-        <label className="flex items-center gap-2 text-foreground-muted">
-          Min match
+      <div className="flex flex-col gap-3 text-sm">
+        <div className="flex flex-wrap items-start gap-4">
+          <label className="flex items-center gap-2 text-foreground-muted">
+            Min match
+            <input
+              type="number"
+              min={0}
+              max={100}
+              value={minScore}
+              onChange={(e) => update({ minScore: Number(e.target.value) })}
+              className="w-16 rounded border border-accent/30 bg-background px-2 py-1 text-foreground"
+            />
+          </label>
           <input
-            type="number"
-            min={0}
-            max={100}
-            value={minScore}
-            onChange={(e) => update({ minScore: Number(e.target.value) })}
-            className="w-16 rounded border border-accent/30 bg-background px-2 py-1 text-foreground"
+            type="text"
+            placeholder="Company contains…"
+            value={company}
+            onChange={(e) => update({ company: e.target.value })}
+            className="rounded border border-accent/30 bg-background px-2 py-1 text-foreground"
           />
-        </label>
-        <input
-          type="text"
-          placeholder="Company contains…"
-          value={company}
-          onChange={(e) => update({ company: e.target.value })}
-          className="rounded border border-accent/30 bg-background px-2 py-1 text-foreground"
-        />
 
-        <div className="flex flex-col gap-1">
-          <span className="text-foreground-muted">Type</span>
-          <div className="flex gap-3">
-            {Object.entries(CATEGORY_LABELS).map(([value, label]) => (
-              <label key={value} className="flex items-center gap-1 text-foreground">
-                <input
-                  type="checkbox"
-                  checked={categories.includes(value)}
-                  onChange={() => update({ categories: toggle(categories, value) })}
-                />
-                {label}
-              </label>
-            ))}
+          <div className="flex flex-col gap-1">
+            <span className="text-foreground-muted">Type</span>
+            <div className="flex flex-wrap gap-3">
+              {Object.entries(CATEGORY_LABELS).map(([value, label]) => (
+                <label key={value} className="flex items-center gap-1 text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={categories.includes(value)}
+                    onChange={() => update({ categories: toggle(categories, value) })}
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
           </div>
-        </div>
 
-        <div className="flex flex-col gap-1">
-          <span className="text-foreground-muted">Level</span>
-          <div className="flex gap-3">
-            {Object.entries(LEVEL_LABELS).map(([value, label]) => (
-              <label key={value} className="flex items-center gap-1 text-foreground">
-                <input
-                  type="checkbox"
-                  checked={levels.includes(value)}
-                  onChange={() => update({ levels: toggle(levels, value) })}
-                />
-                {label}
-              </label>
-            ))}
+          <div className="flex flex-col gap-1">
+            <span className="text-foreground-muted">Level</span>
+            <div className="flex flex-wrap gap-3">
+              {Object.entries(LEVEL_LABELS).map(([value, label]) => (
+                <label key={value} className="flex items-center gap-1 text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={levels.includes(value)}
+                    onChange={() => update({ levels: toggle(levels, value) })}
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
           </div>
         </div>
 
         {visibleLocations.length > 0 && (
-          <div className="flex min-w-0 flex-1 flex-col gap-1">
+          <div className="flex min-w-0 flex-col gap-1">
             <span className="text-foreground-muted">Locations</span>
             <div className="flex flex-wrap items-center gap-1.5">
               {visibleLocations.map((loc) => {

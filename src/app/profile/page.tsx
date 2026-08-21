@@ -3,6 +3,7 @@ import { getProfile, setProfile, getJobsSince, saveJobMatches } from "@/db/queri
 import { scoreJobForUser } from "@/lib/match";
 import { BOARD_RETENTION_DAYS } from "@/lib/board-retention";
 import { revalidatePath } from "next/cache";
+import { ProfileForm, type SaveResult } from "@/components/ProfileForm";
 
 export default async function ProfilePage() {
   const session = await auth();
@@ -12,7 +13,7 @@ export default async function ProfilePage() {
   const userId = session.user.email;
   const background = await getProfile(userId);
 
-  async function save(formData: FormData) {
+  async function save(_prev: SaveResult, formData: FormData): Promise<SaveResult> {
     "use server";
     const background = String(formData.get("background") ?? "");
     await setProfile(userId, background);
@@ -21,8 +22,11 @@ export default async function ProfilePage() {
     // Force re-matching against everything currently on the board — otherwise a rewritten
     // background leaves every existing jobMatches row stale until ingest happens to re-touch
     // that job (which, for an already-seen job, it never does; see getMatchedJobIds). jobMatches
-    // is keyed (userId, jobId), so this is a plain upsert, not a delete-then-reinsert.
-    if (!background.trim()) return;
+    // is keyed (userId, jobId), so this is a plain upsert, not a delete-then-reinsert. The
+    // returned count is what tells the save button rescoring actually happened — the keyword
+    // scorer only looks at a job's own title/company tokens, so a background edit often doesn't
+    // move the number at all, which otherwise reads as "nothing happened."
+    if (!background.trim()) return { rescored: 0 };
     const cutoff = new Date(Date.now() - BOARD_RETENTION_DAYS * 24 * 60 * 60 * 1000);
     const recentJobs = await getJobsSince(cutoff);
     const matches = recentJobs.flatMap((job) => {
@@ -31,6 +35,7 @@ export default async function ProfilePage() {
     });
     await saveJobMatches(matches);
     revalidatePath("/dashboard");
+    return { rescored: matches.length };
   }
 
   return (
@@ -41,18 +46,7 @@ export default async function ProfilePage() {
         This is what job compatibility is scored against, and what the workshop scaffolds into
         resumes and cover letters.
       </p>
-      <form action={save} className="flex flex-col gap-3">
-        <textarea
-          name="background"
-          defaultValue={background}
-          rows={20}
-          className="rounded border border-accent/30 bg-surface p-3 text-sm text-foreground"
-          placeholder="Software engineer with 5 years building backend systems in Go and Python..."
-        />
-        <button type="submit" className="w-fit rounded bg-accent px-4 py-2 text-background hover:bg-accent-strong">
-          Save
-        </button>
-      </form>
+      <ProfileForm action={save} initialBackground={background} />
     </main>
   );
 }

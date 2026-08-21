@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { getProfile, getJobById, saveDocument } from "@/db/queries";
+import { getProfile, getJobById, saveDocument, setActiveDocument } from "@/db/queries";
 import { generateResumeLatex, generateCoverLetterLatex } from "@/lib/resume-scaffold";
 import { compileLatex } from "@/lib/latex";
 import { checkAts } from "@/lib/ats-check";
@@ -31,7 +31,8 @@ export async function POST(req: Request) {
   const pdf = await compileLatex(latex);
   const atsNotes = await checkAts(pdf, kind);
 
-  const saved = await saveDocument({ userId, jobId: job?.id ?? null, kind, latex, atsNotes });
+  const saved = await saveDocument({ userId, jobId: job?.id ?? null, kind, source: "generated", latex, atsNotes });
+  await setActiveDocument(userId, saved.id);
 
   return NextResponse.json({
     documentId: saved.id,

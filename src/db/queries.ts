@@ -264,3 +264,31 @@ export async function saveDocument(row: typeof documents.$inferInsert) {
   const [saved] = await db.insert(documents).values(row).returning();
   return saved;
 }
+
+// "Active" is exclusive per (userId, kind) — marking one resume active unmarks any other resume
+// (cover letters have their own independent active slot). Two sequential updates rather than a
+// transaction: fine at this app's scale (2 users), and Neon's HTTP driver doesn't carry
+// multi-statement transactions well.
+export async function setActiveDocument(userId: string, id: number) {
+  const [doc] = await db
+    .select({ kind: documents.kind })
+    .from(documents)
+    .where(and(eq(documents.id, id), eq(documents.userId, userId)));
+  if (!doc) return;
+  await db.update(documents).set({ active: false }).where(and(eq(documents.userId, userId), eq(documents.kind, doc.kind)));
+  await db.update(documents).set({ active: true }).where(and(eq(documents.id, id), eq(documents.userId, userId)));
+}
+
+export async function getDocumentById(userId: string, id: number) {
+  const [doc] = await db.select().from(documents).where(and(eq(documents.id, id), eq(documents.userId, userId)));
+  return doc ?? null;
+}
+
+// Scoped to userId so one user can't delete another's document by guessing an id.
+export async function deleteDocument(userId: string, id: number) {
+  const [deleted] = await db
+    .delete(documents)
+    .where(and(eq(documents.id, id), eq(documents.userId, userId)))
+    .returning();
+  return deleted ?? null;
+}
