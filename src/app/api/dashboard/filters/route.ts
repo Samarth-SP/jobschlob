@@ -11,6 +11,7 @@ export async function POST(req: Request) {
   await setFilters(session.user.email, {
     minScore: typeof body.minScore === "number" ? body.minScore : undefined,
     locations: strings(body.locations),
+    areas: strings(body.areas),
     company: typeof body.company === "string" && body.company ? body.company : undefined,
     categories: strings(body.categories),
     levels: strings(body.levels),

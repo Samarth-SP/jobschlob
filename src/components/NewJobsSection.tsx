@@ -2,7 +2,7 @@
 
 import { useMemo, useRef, useState } from "react";
 import { RecommendationCard } from "@/components/RecommendationCard";
-import { splitLocations } from "@/lib/locations";
+import { splitLocations, matchesArea, LOCATION_AREAS } from "@/lib/locations";
 import type { DashboardFilters } from "@/lib/dashboard-filters";
 
 const POPULAR_LOCATION_COUNT = 8;
@@ -31,6 +31,7 @@ function toggle(list: string[], value: string): string[] {
 export function NewJobsSection({ jobs, initialFilters }: { jobs: Job[]; initialFilters: DashboardFilters }) {
   const [minScore, setMinScore] = useState(initialFilters.minScore ?? 0);
   const [locations, setLocations] = useState<string[]>(initialFilters.locations ?? []);
+  const [areas, setAreas] = useState<string[]>(initialFilters.areas ?? []);
   const [company, setCompany] = useState(initialFilters.company ?? "");
   const [categories, setCategories] = useState<string[]>(initialFilters.categories ?? []);
   const [levels, setLevels] = useState<string[]>(initialFilters.levels ?? []);
@@ -77,9 +78,10 @@ export function NewJobsSection({ jobs, initialFilters }: { jobs: Job[]; initialF
   }
 
   function update(next: Partial<DashboardFilters>) {
-    const merged = { minScore, locations, company, categories, levels, ...next };
+    const merged = { minScore, locations, areas, company, categories, levels, ...next };
     if (next.minScore !== undefined) setMinScore(next.minScore);
     if (next.locations !== undefined) setLocations(next.locations);
+    if (next.areas !== undefined) setAreas(next.areas);
     if (next.company !== undefined) setCompany(next.company);
     if (next.categories !== undefined) setCategories(next.categories);
     if (next.levels !== undefined) setLevels(next.levels);
@@ -89,13 +91,19 @@ export function NewJobsSection({ jobs, initialFilters }: { jobs: Job[]; initialF
   const filtered = useMemo(() => {
     return jobs.filter((job) => {
       if (minScore > 0 && (job.score === null || job.score < minScore)) return false;
-      if (locations.length && !splitLocations(job.location).some((l) => locations.includes(l))) return false;
+      // Locations and areas are two ways to ask for the same thing (a specific city vs. a metro
+      // grouping), so either one matching is enough — not an AND of both.
+      if (locations.length || areas.length) {
+        const cityMatch = locations.length && splitLocations(job.location).some((l) => locations.includes(l));
+        const areaMatch = areas.length && areas.some((a) => matchesArea(job.location, a));
+        if (!cityMatch && !areaMatch) return false;
+      }
       if (company && !job.company.toLowerCase().includes(company.toLowerCase())) return false;
       if (categories.length && !(job.category && categories.includes(job.category))) return false;
       if (levels.length && !(job.level && levels.includes(job.level))) return false;
       return true;
     });
-  }, [jobs, minScore, locations, company, categories, levels]);
+  }, [jobs, minScore, locations, areas, company, categories, levels]);
 
   return (
     <div className="flex flex-col gap-3">
@@ -150,6 +158,18 @@ export function NewJobsSection({ jobs, initialFilters }: { jobs: Job[]; initialF
                 </label>
               ))}
             </div>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <span className="text-foreground-muted">Area</span>
+          <div className="flex flex-wrap gap-3">
+            {Object.keys(LOCATION_AREAS).map((area) => (
+              <label key={area} className="flex items-center gap-1 text-foreground">
+                <input type="checkbox" checked={areas.includes(area)} onChange={() => update({ areas: toggle(areas, area) })} />
+                {area}
+              </label>
+            ))}
           </div>
         </div>
 
