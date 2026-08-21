@@ -5,4 +5,5 @@ export type DashboardFilters = {
   company?: string;
   categories?: string[];
   levels?: string[];
+  degreeLevels?: string[]; // 'bachelors' | 'masters' | 'phd' — see lib/degree-heuristic.ts
 };

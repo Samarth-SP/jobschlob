@@ -14,6 +14,7 @@ type Job = {
   location: string | null;
   category: string | null;
   level: string | null;
+  degreeLevel: string | null;
   url: string;
   postedAt: Date | string | null;
   status: string | null;
@@ -23,6 +24,7 @@ type Job = {
 
 const CATEGORY_LABELS: Record<string, string> = { tech: "Tech", consulting: "Consulting", vc_pe: "VC/PE", robotics: "Robotics" };
 const LEVEL_LABELS: Record<string, string> = { internship: "Internship", new_grad: "New grad" };
+const DEGREE_LABELS: Record<string, string> = { bachelors: "Bachelor's", masters: "Master's", phd: "PhD" };
 
 function toggle(list: string[], value: string): string[] {
   return list.includes(value) ? list.filter((v) => v !== value) : [...list, value];
@@ -35,6 +37,7 @@ export function NewJobsSection({ jobs, initialFilters }: { jobs: Job[]; initialF
   const [company, setCompany] = useState(initialFilters.company ?? "");
   const [categories, setCategories] = useState<string[]>(initialFilters.categories ?? []);
   const [levels, setLevels] = useState<string[]>(initialFilters.levels ?? []);
+  const [degreeLevels, setDegreeLevels] = useState<string[]>(initialFilters.degreeLevels ?? []);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const locationCounts = useMemo(() => {
@@ -78,13 +81,14 @@ export function NewJobsSection({ jobs, initialFilters }: { jobs: Job[]; initialF
   }
 
   function update(next: Partial<DashboardFilters>) {
-    const merged = { minScore, locations, areas, company, categories, levels, ...next };
+    const merged = { minScore, locations, areas, company, categories, levels, degreeLevels, ...next };
     if (next.minScore !== undefined) setMinScore(next.minScore);
     if (next.locations !== undefined) setLocations(next.locations);
     if (next.areas !== undefined) setAreas(next.areas);
     if (next.company !== undefined) setCompany(next.company);
     if (next.categories !== undefined) setCategories(next.categories);
     if (next.levels !== undefined) setLevels(next.levels);
+    if (next.degreeLevels !== undefined) setDegreeLevels(next.degreeLevels);
     persist(merged);
   }
 
@@ -101,9 +105,10 @@ export function NewJobsSection({ jobs, initialFilters }: { jobs: Job[]; initialF
       if (company && !job.company.toLowerCase().includes(company.toLowerCase())) return false;
       if (categories.length && !(job.category && categories.includes(job.category))) return false;
       if (levels.length && !(job.level && levels.includes(job.level))) return false;
+      if (degreeLevels.length && !(job.degreeLevel && degreeLevels.includes(job.degreeLevel))) return false;
       return true;
     });
-  }, [jobs, minScore, locations, areas, company, categories, levels]);
+  }, [jobs, minScore, locations, areas, company, categories, levels, degreeLevels]);
 
   return (
     <div className="flex flex-col gap-3">
@@ -153,6 +158,22 @@ export function NewJobsSection({ jobs, initialFilters }: { jobs: Job[]; initialF
                     type="checkbox"
                     checked={levels.includes(value)}
                     onChange={() => update({ levels: toggle(levels, value) })}
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-1">
+            <span className="text-foreground-muted">Degree</span>
+            <div className="flex flex-wrap gap-3">
+              {Object.entries(DEGREE_LABELS).map(([value, label]) => (
+                <label key={value} className="flex items-center gap-1 text-foreground">
+                  <input
+                    type="checkbox"
+                    checked={degreeLevels.includes(value)}
+                    onChange={() => update({ degreeLevels: toggle(degreeLevels, value) })}
                   />
                   {label}
                 </label>

@@ -7,9 +7,9 @@ import { BOARD_RETENTION_DAYS } from "@/lib/board-retention";
 // Every function below takes userId first and filters on it — jobs is the one shared,
 // non-user-scoped table (the board), touched only by upsertJobs from the ingest script.
 
-// New jobs ranked by keyword-match compatibility score (jobMatches, populated by
-// scripts/ingest.ts). Unscored jobs (not yet matched, or the user has no profile) sort after
-// scored ones by createdAt, so this doesn't depend on ingest's match-scoring pass having run yet.
+// New jobs sorted by recency first, keyword-match compatibility score (jobMatches, populated by
+// scripts/ingest.ts) as the tiebreaker within same-day postings — a great match from three weeks
+// ago is still less actionable than something that just went up.
 //
 // A job tracked by ANY user is exempt from ingest's prune step (see scripts/ingest.ts), so the
 // jobs table alone can hold postings well past the retention window. Without the age/tracked
@@ -23,7 +23,7 @@ export async function getRankedBoard(userId: string) {
     .leftJoin(trackedJobs, and(eq(trackedJobs.jobId, jobs.id), eq(trackedJobs.userId, userId)))
     .leftJoin(jobMatches, and(eq(jobMatches.jobId, jobs.id), eq(jobMatches.userId, userId)))
     .where(or(gte(jobs.createdAt, cutoff), isNotNull(trackedJobs.status)))
-    .orderBy(sql`${jobMatches.score} DESC NULLS LAST`, desc(jobs.createdAt));
+    .orderBy(desc(jobs.createdAt), sql`${jobMatches.score} DESC NULLS LAST`);
 
   return rows.map((r) => ({ ...r.job, status: r.status, score: r.score, rationale: r.rationale }));
 }
@@ -125,6 +125,7 @@ export async function upsertJobs(rows: (typeof jobs.$inferInsert)[]) {
           url: sql`excluded.url`,
           category: sql`excluded.category`,
           level: sql`excluded.level`,
+          degreeLevel: sql`excluded.degree_level`,
           postedAt: sql`excluded.posted_at`,
         },
       });

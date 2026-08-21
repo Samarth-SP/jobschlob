@@ -3,6 +3,7 @@ import { StatusEditor } from "@/components/StatusEditor";
 
 const CATEGORY_LABELS: Record<string, string> = { tech: "Tech", consulting: "Consulting", vc_pe: "VC/PE", robotics: "Robotics" };
 const LEVEL_LABELS: Record<string, string> = { internship: "Internship", new_grad: "New grad" };
+const DEGREE_LABELS: Record<string, string> = { bachelors: "Bachelor's", masters: "Master's", phd: "PhD" };
 
 // Our score's rationale is literally "Matched keywords: x, y, z" (see lib/match.ts) — parsing it
 // back into chips reuses that real signal instead of the Figma reference's fabricated reason list.
@@ -29,6 +30,7 @@ type Job = {
   location: string | null;
   category: string | null;
   level: string | null;
+  degreeLevel: string | null;
   url: string;
   postedAt: Date | string | null;
   status: string | null;
@@ -40,7 +42,7 @@ export function RecommendationCard({ job }: { job: Job }) {
   const chips = reasonChips(job.rationale);
 
   return (
-    <div className="flex items-center gap-4 rounded-xl border border-accent/15 bg-surface px-4 py-3.5 transition-colors hover:border-accent/30">
+    <div className="flex items-start gap-4 rounded-xl border border-accent/15 bg-surface px-4 py-3.5 transition-colors hover:border-accent/30">
       {job.score !== null ? <ScoreRing score={job.score} /> : <div className="h-12 w-12 shrink-0" />}
 
       <div className="min-w-0 flex-1">
@@ -48,11 +50,11 @@ export function RecommendationCard({ job }: { job: Job }) {
           href={job.url}
           target="_blank"
           rel="noopener noreferrer"
-          className="truncate font-medium text-foreground hover:underline"
+          className="block line-clamp-2 break-words font-medium text-foreground hover:underline"
         >
           {job.title}
         </a>
-        <p className="truncate text-xs text-foreground-muted">
+        <p className="break-words text-xs text-foreground-muted">
           {job.company} · {job.location ?? "remote/unspecified"}
         </p>
         <div className="mt-2 flex flex-wrap gap-1.5">
@@ -64,6 +66,11 @@ export function RecommendationCard({ job }: { job: Job }) {
           {job.category && (
             <span className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent">
               {CATEGORY_LABELS[job.category] ?? job.category}
+            </span>
+          )}
+          {job.degreeLevel && (
+            <span className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] text-accent">
+              {DEGREE_LABELS[job.degreeLevel] ?? job.degreeLevel}
             </span>
           )}
           {chips.map((c) => (

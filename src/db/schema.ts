@@ -9,6 +9,10 @@ export const jobs = pgTable("jobs", {
   source: text("source").notNull(), // e.g. "greenhouse:acme"
   category: text("category"), // 'tech' | 'consulting' | 'vc_pe' | 'robotics' — set per source in scripts/ingest.ts
   level: text("level"), // 'internship' | 'new_grad' — see lib/level-heuristic.ts
+  // 'bachelors' | 'masters' | 'phd' | null — see lib/degree-heuristic.ts. Null for every
+  // SimplifyJobs-sourced job (no description text available to classify) and for any
+  // Greenhouse/Lever/Ashby posting that doesn't mention a degree requirement at all.
+  degreeLevel: text("degree_level"),
   postedAt: timestamp("posted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
