@@ -53,13 +53,17 @@ export function WorkshopDashboard({
   const [busyIds, setBusyIds] = useState<Set<number>>(new Set());
   const [pdfReloadToken, setPdfReloadToken] = useState(0);
   const [draftLatex, setDraftLatex] = useState("");
+  const [dirty, setDirty] = useState(false);
   const texInput = useRef<HTMLInputElement>(null);
   const pdfInput = useRef<HTMLInputElement>(null);
+  const recompileTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const openDoc = docs.find((d) => d.id === openId) ?? null;
   const openAtsNotes = openDoc ? asAtsNotes(openDoc.atsNotes) : null;
 
   useEffect(() => {
+    if (recompileTimer.current) clearTimeout(recompileTimer.current);
+    setDirty(false);
     if (openDoc) setDraftLatex(openDoc.latex ?? "");
   }, [openDoc?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -183,17 +187,31 @@ export function WorkshopDashboard({
     }
   }
 
-  async function recompile(id: number) {
+  async function recompile(id: number, latex: string) {
+    if (recompileTimer.current) clearTimeout(recompileTimer.current);
     setBusy(id, true);
     try {
-      const data = await postAction(id, "recompile", { latex: draftLatex });
-      setDocs((prev) => prev.map((d) => (d.id === id ? { ...d, latex: draftLatex, atsNotes: data.atsNotes } : d)));
+      const data = await postAction(id, "recompile", { latex });
+      setDocs((prev) => prev.map((d) => (d.id === id ? { ...d, latex, atsNotes: data.atsNotes } : d)));
       setPdfReloadToken((t) => t + 1);
+      setDirty(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Recompile failed");
     } finally {
       setBusy(id, false);
     }
+  }
+
+  // Overleaf-style live preview, minus the WASM LaTeX engine Overleaf itself doesn't even use —
+  // no Overleaf plugin/embed exists to pull in, and a browser LaTeX engine (SwiftLaTeX etc.) would
+  // hit the exact same "arbitrary packages don't compile" wall the upload flow already hit, just
+  // with a multi-MB WASM download on top. Debouncing the existing server-side Tectonic compile
+  // gets the same felt experience — edits, pauses, and the PDF catches up — with zero new deps.
+  function onLatexChange(id: number, next: string) {
+    setDraftLatex(next);
+    setDirty(true);
+    if (recompileTimer.current) clearTimeout(recompileTimer.current);
+    recompileTimer.current = setTimeout(() => recompile(id, next), 1200);
   }
 
   return (
@@ -322,13 +340,18 @@ export function WorkshopDashboard({
                   {busyIds.has(openDoc.id) ? "Scanning…" : "Re-scan ATS"}
                 </button>
                 {openDoc.latex !== null && (
-                  <button
-                    onClick={() => recompile(openDoc.id)}
-                    disabled={busyIds.has(openDoc.id) || draftLatex === openDoc.latex}
-                    className="rounded bg-accent px-3 py-1 text-xs text-background hover:bg-accent-strong disabled:opacity-50"
-                  >
-                    {busyIds.has(openDoc.id) ? "Recompiling…" : "Save & recompile"}
-                  </button>
+                  <>
+                    <button
+                      onClick={() => recompile(openDoc.id, draftLatex)}
+                      disabled={busyIds.has(openDoc.id) || draftLatex === openDoc.latex}
+                      className="rounded bg-accent px-3 py-1 text-xs text-background hover:bg-accent-strong disabled:opacity-50"
+                    >
+                      {busyIds.has(openDoc.id) ? "Recompiling…" : "Recompile now"}
+                    </button>
+                    <span className="text-xs text-foreground-muted">
+                      {busyIds.has(openDoc.id) ? "· recompiling…" : dirty ? "· editing, will auto-recompile…" : "· up to date"}
+                    </span>
+                  </>
                 )}
                 <div className="ml-auto flex items-center gap-3">
                   {!openDoc.active && (
@@ -348,7 +371,7 @@ export function WorkshopDashboard({
                   {openDoc.latex !== null ? (
                     <textarea
                       value={draftLatex}
-                      onChange={(e) => setDraftLatex(e.target.value)}
+                      onChange={(e) => onLatexChange(openDoc.id, e.target.value)}
                       spellCheck={false}
                       className="h-full w-full resize-none bg-surface p-4 font-mono text-xs leading-relaxed text-foreground focus:outline-none"
                     />

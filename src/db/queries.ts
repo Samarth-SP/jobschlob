@@ -170,10 +170,6 @@ export async function saveJobMatches(
     });
 }
 
-export async function getJobMatches(userId: string) {
-  return db.select().from(jobMatches).where(eq(jobMatches.userId, userId));
-}
-
 // Ingest-only — every user with a background set, to score newly-seen jobs against.
 export async function getAllProfiles() {
   return db.select().from(profiles);
@@ -188,14 +184,6 @@ export async function getMatchedJobIds(userId: string, jobIds: string[]): Promis
     .from(jobMatches)
     .where(and(eq(jobMatches.userId, userId), inArray(jobMatches.jobId, jobIds)));
   return new Set(rows.map((r) => r.jobId));
-}
-
-export async function getApplicationEvents(userId: string) {
-  return db
-    .select()
-    .from(applicationEvents)
-    .where(eq(applicationEvents.userId, userId))
-    .orderBy(applicationEvents.changedAt);
 }
 
 export async function getApplicationEventsByDay(userId: string) {

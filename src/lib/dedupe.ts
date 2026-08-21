@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 // always maps to the same job id. Must NOT be derived from title/company alone — sources
 // routinely have multiple open listings with an identical title (e.g. "Software Engineer" in
 // three offices), which would collide onto one row and break the ingest upsert.
-export function normalize(s: string): string {
+function normalize(s: string): string {
   return s.trim().toLowerCase().replace(/\s+/g, " ");
 }
 
