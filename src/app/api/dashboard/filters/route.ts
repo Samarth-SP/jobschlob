@@ -15,6 +15,7 @@ export async function POST(req: Request) {
     company: typeof body.company === "string" && body.company ? body.company : undefined,
     categories: strings(body.categories),
     levels: strings(body.levels),
+    degreeLevels: strings(body.degreeLevels),
   });
 
   return NextResponse.json({ ok: true });

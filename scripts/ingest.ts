@@ -3,6 +3,7 @@ import { upsertJobs, getAllProfiles, getMatchedJobIds, saveJobMatches } from "..
 import { jobId } from "../src/lib/dedupe";
 import { scoreJobForUser } from "../src/lib/match";
 import { classifyLevel } from "../src/lib/level-heuristic";
+import { classifyDegree, stripHtml } from "../src/lib/degree-heuristic";
 import { BOARD_RETENTION_DAYS } from "../src/lib/board-retention";
 import { jobs, trackedJobs } from "../src/db/schema";
 import { and, lt, notInArray } from "drizzle-orm";
@@ -77,10 +78,14 @@ type GreenhouseJob = {
   location: { name: string };
   absolute_url: string;
   updated_at: string;
+  content?: string; // HTML — only present with ?content=true, see stripHtml() below
 };
 
+// content=true pulls the full HTML job description into the same response (one request, no
+// per-job follow-up) so classifyDegree() has something to search — the list endpoint alone
+// carries no description text at all.
 async function fetchGreenhouseBoard(board: (typeof GREENHOUSE_BOARDS)[number]) {
-  const res = await fetch(`https://boards-api.greenhouse.io/v1/boards/${board.slug}/jobs`);
+  const res = await fetch(`https://boards-api.greenhouse.io/v1/boards/${board.slug}/jobs?content=true`);
   if (!res.ok) throw new Error(`${board.slug}: ${res.status}`);
   const { jobs: listings }: { jobs: GreenhouseJob[] } = await res.json();
 
@@ -97,6 +102,7 @@ async function fetchGreenhouseBoard(board: (typeof GREENHOUSE_BOARDS)[number]) {
         source: `greenhouse:${board.slug}`,
         category: board.category,
         level,
+        degreeLevel: classifyDegree(`${j.title} ${stripHtml(j.content ?? "")}`),
         postedAt: new Date(j.updated_at),
       },
     ];
@@ -109,10 +115,14 @@ type LeverPosting = {
   categories: { location?: string };
   hostedUrl: string;
   createdAt: number; // unix ms
+  descriptionPlain?: string;
+  additionalPlain?: string;
+  openingPlain?: string;
 };
 
 // Lever's public postings API — same no-auth, no-scraping shape as Greenhouse. Boards mix every
-// seniority together too, so postings run through classifyLevel() the same way.
+// seniority together too, so postings run through classifyLevel() the same way. The *Plain
+// fields are already-stripped text (unlike Greenhouse's HTML content), so no stripHtml() needed.
 async function fetchLeverBoard(board: (typeof LEVER_BOARDS)[number]) {
   const res = await fetch(`https://api.lever.co/v0/postings/${board.slug}?mode=json`);
   if (!res.ok) throw new Error(`${board.slug}: ${res.status}`);
@@ -131,6 +141,7 @@ async function fetchLeverBoard(board: (typeof LEVER_BOARDS)[number]) {
         source: `lever:${board.slug}`,
         category: board.category,
         level,
+        degreeLevel: classifyDegree(`${j.text} ${j.descriptionPlain ?? ""} ${j.additionalPlain ?? ""} ${j.openingPlain ?? ""}`),
         postedAt: new Date(j.createdAt),
       },
     ];
@@ -144,10 +155,12 @@ type AshbyJob = {
   jobUrl: string;
   publishedAt: string;
   isListed: boolean;
+  descriptionPlain?: string;
 };
 
 // Ashby's public job-board API — same no-auth shape. `isListed: false` means the posting is
 // closed/hidden but still present in the response, so it's filtered out before classifyLevel().
+// descriptionPlain is already plain text, same as Lever's *Plain fields.
 async function fetchAshbyBoard(board: (typeof LEVER_BOARDS)[number]) {
   const res = await fetch(`https://api.ashbyhq.com/posting-api/job-board/${board.slug}`);
   if (!res.ok) throw new Error(`${board.slug}: ${res.status}`);
@@ -167,6 +180,7 @@ async function fetchAshbyBoard(board: (typeof LEVER_BOARDS)[number]) {
         source: `ashby:${board.slug}`,
         category: board.category,
         level,
+        degreeLevel: classifyDegree(`${j.title} ${j.descriptionPlain ?? ""}`),
         postedAt: new Date(j.publishedAt),
       },
     ];
