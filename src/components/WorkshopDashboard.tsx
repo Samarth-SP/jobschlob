@@ -176,6 +176,7 @@ export function WorkshopDashboard({
   }
 
   async function rescan(id: number) {
+    setError(null);
     setBusy(id, true);
     try {
       const data = await postAction(id, "rescan");
@@ -189,6 +190,7 @@ export function WorkshopDashboard({
 
   async function recompile(id: number, latex: string) {
     if (recompileTimer.current) clearTimeout(recompileTimer.current);
+    setError(null);
     setBusy(id, true);
     try {
       const data = await postAction(id, "recompile", { latex });
@@ -261,7 +263,17 @@ export function WorkshopDashboard({
           {uploading ? "Uploading…" : "Upload"}
         </button>
       </div>
-      {error && <p className="text-sm text-red-700">{error}</p>}
+      {/* Fixed above the panel's z-50 overlay — an action taken inside the panel (recompile,
+          rescan) needs its error visible while the panel is open, not hidden behind it until
+          you close it. */}
+      {error && (
+        <div className="fixed left-1/2 top-4 z-[60] -translate-x-1/2 rounded border border-red-700/40 bg-red-50 px-4 py-2 text-sm text-red-800 shadow-lg">
+          {error}
+          <button onClick={() => setError(null)} className="ml-3 underline">
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <div className="flex flex-col gap-2">
         <AnimatePresence initial={false}>
