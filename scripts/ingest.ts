@@ -3,6 +3,7 @@ import { upsertJobs, getAllProfiles, getMatchedJobIds, saveJobMatches } from "..
 import { jobId } from "../src/lib/dedupe";
 import { scoreJobForUser } from "../src/lib/match";
 import { classifyLevel } from "../src/lib/level-heuristic";
+import { BOARD_RETENTION_DAYS } from "../src/lib/board-retention";
 import { jobs, trackedJobs } from "../src/db/schema";
 import { and, lt, notInArray } from "drizzle-orm";
 
@@ -267,13 +268,16 @@ async function main() {
   }
   if (profiles.length) console.log(`scored ${scored} job matches across ${profiles.length} profile(s)`);
 
-  const cutoff = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000);
+  // Any user tracking a job (selectDistinct over trackedJobs, no userId filter) keeps it alive
+  // past the retention window — never let pruning pull a row out from under someone's
+  // application history.
+  const cutoff = new Date(Date.now() - BOARD_RETENTION_DAYS * 24 * 60 * 60 * 1000);
   const tracked = await db.selectDistinct({ id: trackedJobs.jobId }).from(trackedJobs);
   const deleted = await db
     .delete(jobs)
     .where(and(lt(jobs.createdAt, cutoff), notInArray(jobs.id, tracked.length ? tracked.map((t) => t.id) : [""])))
     .returning({ id: jobs.id });
-  if (deleted.length) console.log(`pruned ${deleted.length} jobs older than 60 days`);
+  if (deleted.length) console.log(`pruned ${deleted.length} jobs older than ${BOARD_RETENTION_DAYS} days`);
 }
 
 main().catch((err) => {

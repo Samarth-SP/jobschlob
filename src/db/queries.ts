@@ -1,4 +1,4 @@
-import { eq, and, desc, sql, avg, count, inArray } from "drizzle-orm";
+import { eq, and, desc, sql, avg, count, inArray, gte } from "drizzle-orm";
 import { db } from "./client";
 import { jobs, trackedJobs, profiles, jobMatches, applicationEvents, documents } from "./schema";
 import type { DashboardFilters } from "@/lib/dashboard-filters";
@@ -18,6 +18,13 @@ export async function getRankedBoard(userId: string) {
     .orderBy(sql`${jobMatches.score} DESC NULLS LAST`, desc(jobs.createdAt));
 
   return rows.map((r) => ({ ...r.job, status: r.status, score: r.score, rationale: r.rationale }));
+}
+
+// Everything still within the board's retention window (see BOARD_RETENTION_DAYS) — used by
+// the profile page to force-rescore against whatever's currently live when the background
+// changes, without waiting for the next ingest run.
+export async function getJobsSince(cutoff: Date) {
+  return db.select().from(jobs).where(gte(jobs.createdAt, cutoff));
 }
 
 export async function getJobById(id: string) {
