@@ -3,7 +3,7 @@ import { auth } from "@/lib/auth";
 import { getJobById, saveDocument, setActiveDocument } from "@/db/queries";
 import { uploadDocumentPdf, UploadTooLargeError } from "@/lib/blob-storage";
 import { checkAts } from "@/lib/ats-check";
-import { compileLatex } from "@/lib/latex";
+import { compileLatex, LatexCompileError } from "@/lib/latex";
 
 export const runtime = "nodejs";
 
@@ -46,9 +46,10 @@ export async function POST(req: Request) {
     // compile failure, not a bug to swallow — tell the user plainly instead of a raw 500.
     try {
       pdf = await compileLatex(latex);
-    } catch {
+    } catch (err) {
+      const detail = err instanceof LatexCompileError ? err.message : "unsupported package or command";
       return NextResponse.json(
-        { error: "This .tex file didn't compile in our sandbox (unsupported package or command). Upload the compiled PDF alongside it instead." },
+        { error: `This .tex file didn't compile in our sandbox (${detail}). Upload the compiled PDF alongside it instead.` },
         { status: 422 },
       );
     }

@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getDocumentById, setActiveDocument, deleteDocument, updateDocumentContent } from "@/db/queries";
 import { fetchDocumentPdf, deleteDocumentPdf, uploadDocumentPdf } from "@/lib/blob-storage";
-import { compileLatex } from "@/lib/latex";
+import { compileLatex, LatexCompileError } from "@/lib/latex";
 import { checkAts } from "@/lib/ats-check";
 
 export const runtime = "nodejs";
@@ -56,7 +56,19 @@ export async function POST(req: Request) {
     const latex = typeof body.latex === "string" ? body.latex : doc.latex;
     if (!latex) return NextResponse.json({ error: "No LaTeX source on this document." }, { status: 400 });
 
-    const pdf = await compileLatex(latex);
+    // The most likely way this fails: the user typed plain prose into the editor and it happened
+    // to contain a raw &/%/#/_/$ — LaTeX's reserved characters — which Tectonic rejects outright.
+    // That's a normal edit gone wrong, not a server bug, so it gets a clean 422 with Tectonic's
+    // own error text instead of bubbling up as an uncaught 500 with an empty body (which res.json()
+    // on the client then fails to parse, surfacing a confusing "invalid JSON"-shaped error instead
+    // of the real one).
+    let pdf: Buffer;
+    try {
+      pdf = await compileLatex(latex);
+    } catch (err) {
+      if (err instanceof LatexCompileError) return NextResponse.json({ error: err.message }, { status: 422 });
+      throw err;
+    }
     const atsNotes = await checkAts(pdf, doc.kind === "cover_letter" ? "cover_letter" : "resume");
     const blobUrl = await uploadDocumentPdf(userId, doc.kind, doc.filename ?? `${doc.kind}.pdf`, pdf);
     if (doc.blobUrl) await deleteDocumentPdf(doc.blobUrl);
