@@ -33,12 +33,13 @@ export default async function WorkshopPage() {
   const jobs = tracked.map(({ job }) => ({ id: job.id, title: job.title, company: job.company }));
 
   return (
-    <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-4 px-6 py-8">
+    <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-4 px-6 py-8">
       <h1 className="text-xl font-semibold text-pop">Workshop</h1>
       <p className="text-sm text-foreground-muted">
-        Generate a resume or cover letter from your background, or upload one you already tailored
-        elsewhere — either way it lands in the library below. Open any document to preview it,
-        re-run the ATS check, and edit its wording in place.
+        Generate a resume or cover letter from your background, or bring your own — a .tex source
+        is required so it can actually be workshopped here, a PDF alone can't be edited. Either
+        way it lands in the library below: open any document to preview it, re-run the ATS check,
+        and edit its wording in place, side by side with the rendered PDF.
       </p>
       <WorkshopDashboard initialDocuments={documents} jobs={jobs} />
     </main>
