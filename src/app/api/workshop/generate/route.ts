@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getProfile, getJobById, saveDocument, setActiveDocument } from "@/db/queries";
 import { generateResumeLatex, generateCoverLetterLatex } from "@/lib/resume-scaffold";
-import { compileLatex } from "@/lib/latex";
+import { compileLatex, LatexCompileError } from "@/lib/latex";
 import { checkAts } from "@/lib/ats-check";
 import { uploadDocumentPdf } from "@/lib/blob-storage";
 
@@ -29,7 +29,16 @@ export async function POST(req: Request) {
       ? await generateCoverLetterLatex(background, job ? { title: job.title, company: job.company } : { title: "the role", company: "the company" })
       : await generateResumeLatex(background, job ? `${job.title} at ${job.company}` : undefined);
 
-  const pdf = await compileLatex(latex);
+  // The LLM's own output is well-behaved almost always (it's prompted with a working exemplar),
+  // but not guaranteed — same clean-error treatment as the recompile path rather than an uncaught
+  // 500 with an empty body.
+  let pdf: Buffer;
+  try {
+    pdf = await compileLatex(latex);
+  } catch (err) {
+    if (err instanceof LatexCompileError) return NextResponse.json({ error: `Generation produced invalid LaTeX: ${err.message}` }, { status: 502 });
+    throw err;
+  }
   const atsNotes = await checkAts(pdf, kind);
 
   // Stored alongside latex (not just recompiled on demand) so a generated document lives in the
