@@ -12,7 +12,7 @@
 % \input{glyphtounicode}, which calls the pdfTeX-only \pdfglyphtounicode primitive the moment it
 % loads. Tectonic's engine doesn't implement that primitive at all, so there's no cache-warming
 % fix for it, not even caching glyphtounicode.tex itself (tried — it crashes THIS build, not just
-% an uploader's). That one stays a hard, documented limitation. Everything below it isn't.
+% an uploader's). lib/latex.ts strips that at compile time instead. Everything below it isn't.
 \usepackage{latexsym}
 \usepackage{fullpage}
 \usepackage{marvosym}
@@ -21,7 +21,13 @@
 \usepackage{fancyhdr}
 \usepackage[english]{babel}
 \usepackage{tabularx}
-\usepackage{charter} % that template's default font choice — its own font files, warmed too
+% NOT \usepackage{charter} — that legacy package has no font-shape entry for XeTeX's Unicode (TU)
+% encoding, so under Tectonic it doesn't error, it silently substitutes the default font and
+% reflows the whole document (confirmed by rendering both and comparing — not a guess). lib/
+% latex.ts rewrites \usepackage{charter} to \usepackage{XCharter} at compile time — the actively-
+% maintained XeTeX/LuaTeX-native rebuild of the same typeface, real OpenType files. Warmed here
+% under its real name so that substitution has something to land on.
+\usepackage{XCharter}
 \titleformat{\section}{\bfseries\large}{}{0em}{}[\titlerule]
 \begin{document}
 \begin{center}

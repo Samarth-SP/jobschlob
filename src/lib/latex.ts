@@ -47,14 +47,38 @@ const UNSUPPORTED_PRIMITIVE_LINES = [
   { pattern: /^.*\\pdfglyphtounicode\{[^}]*\}\{[^}]*\}.*$\n?/gm, label: "\\pdfglyphtounicode{...}{...}" },
 ];
 
+// The legacy `charter` package assumes pdfTeX's Type1/OT1 font model and has no font-shape entry
+// for XeTeX's Unicode (TU) encoding — under Tectonic it doesn't error, it just silently falls
+// back to the default font (LaTeX Font Warning: Font shape `TU/bch/m/n' undefined, using
+// `TU/lmr/m/n' instead), which also reflows line breaks and can push a one-page resume onto two.
+// Confirmed by rendering both and comparing. XCharter is the actively-maintained XeTeX/LuaTeX-
+// native rebuild of the same Bitstream Charter typeface (real OpenType files, proper TU mapping)
+// — swapping to it is a drop-in fix, not a compromise.
+const PACKAGE_SUBSTITUTIONS = [
+  { pattern: /\\usepackage(\[[^\]]*\])?\{charter\}/g, replacement: "\\usepackage$1{XCharter}", label: "charter → XCharter" },
+];
+
+// Replace-then-compare rather than test()-then-replace(): a `g`-flagged RegExp is stateful
+// (lastIndex persists on the shared module-level object), so calling .test() before .replace()
+// on the same pattern can silently skip matches on a later call. Comparing output to input avoids
+// touching lastIndex in a way that leaks between calls entirely.
+function applyIfChanged(source: string, pattern: RegExp, replacement: string): { next: string; changed: boolean } {
+  const next = source.replace(pattern, replacement);
+  return { next, changed: next !== source };
+}
+
 export function stripUnsupportedPrimitives(source: string): { source: string; stripped: string[] } {
   const stripped: string[] = [];
   let next = source;
   for (const { pattern, label } of UNSUPPORTED_PRIMITIVE_LINES) {
-    if (pattern.test(next)) {
-      stripped.push(label);
-      next = next.replace(pattern, "");
-    }
+    const result = applyIfChanged(next, pattern, "");
+    if (result.changed) stripped.push(label);
+    next = result.next;
+  }
+  for (const { pattern, replacement, label } of PACKAGE_SUBSTITUTIONS) {
+    const result = applyIfChanged(next, pattern, replacement);
+    if (result.changed) stripped.push(label);
+    next = result.next;
   }
   return { source: next, stripped };
 }
@@ -63,7 +87,7 @@ export async function compileLatex(source: string): Promise<{ pdf: Buffer; sourc
   await ensureRuntimeCache();
   const { source: cleaned, stripped } = stripUnsupportedPrimitives(source);
   const warnings = stripped.length
-    ? [`Removed unsupported LaTeX (pdfTeX-only, not implemented by our engine): ${stripped.join(", ")}`]
+    ? [`Adjusted LaTeX for compatibility with our engine: ${stripped.join(", ")}`]
     : [];
 
   const dir = await mkdtemp(join(tmpdir(), "latex-"));
