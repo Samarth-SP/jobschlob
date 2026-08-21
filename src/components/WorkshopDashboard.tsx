@@ -53,7 +53,8 @@ export function WorkshopDashboard({
   const [busyIds, setBusyIds] = useState<Set<number>>(new Set());
   const [pdfReloadToken, setPdfReloadToken] = useState(0);
   const [draftLatex, setDraftLatex] = useState("");
-  const fileInput = useRef<HTMLInputElement>(null);
+  const texInput = useRef<HTMLInputElement>(null);
+  const pdfInput = useRef<HTMLInputElement>(null);
 
   const openDoc = docs.find((d) => d.id === openId) ?? null;
   const openAtsNotes = openDoc ? asAtsNotes(openDoc.atsNotes) : null;
@@ -116,12 +117,22 @@ export function WorkshopDashboard({
     }
   }
 
-  async function upload(file: File) {
+  // A .tex file is required — a bare PDF has no source to workshop, which is the entire point of
+  // this page (see the panel's editor below). The PDF is optional: give us one and we store it
+  // as-is, skip it and we compile the .tex ourselves.
+  async function upload() {
+    const texFile = texInput.current?.files?.[0];
+    if (!texFile) {
+      setError("A .tex file is required — a PDF alone can't be edited here.");
+      return;
+    }
     setUploading(true);
     setError(null);
     try {
       const form = new FormData();
-      form.append("file", file);
+      form.append("tex", texFile);
+      const pdfFile = pdfInput.current?.files?.[0];
+      if (pdfFile) form.append("pdf", pdfFile);
       form.append("kind", kind);
       if (jobId) form.append("jobId", jobId);
       const res = await fetch("/api/workshop/upload", { method: "POST", body: form });
@@ -132,7 +143,7 @@ export function WorkshopDashboard({
         kind: data.kind,
         source: "uploaded",
         filename: data.filename,
-        latex: null,
+        latex: data.latex,
         blobUrl: "stored",
         active: true,
         atsNotes: data.atsNotes,
@@ -142,7 +153,8 @@ export function WorkshopDashboard({
       setError(e instanceof Error ? e.message : "Upload failed");
     } finally {
       setUploading(false);
-      if (fileInput.current) fileInput.current.value = "";
+      if (texInput.current) texInput.current.value = "";
+      if (pdfInput.current) pdfInput.current.value = "";
     }
   }
 
@@ -214,16 +226,22 @@ export function WorkshopDashboard({
         >
           {generating ? "Generating…" : "Generate"}
         </button>
-        <span className="text-foreground-muted">or</span>
-        <input
-          ref={fileInput}
-          type="file"
-          accept="application/pdf"
+        <span className="text-foreground-muted">or bring your own —</span>
+        <label className="flex items-center gap-1.5 text-sm text-foreground-muted">
+          .tex (required)
+          <input ref={texInput} type="file" accept=".tex" disabled={uploading} className="text-xs" />
+        </label>
+        <label className="flex items-center gap-1.5 text-sm text-foreground-muted">
+          .pdf (optional — we'll compile the .tex if you skip this)
+          <input ref={pdfInput} type="file" accept="application/pdf" disabled={uploading} className="text-xs" />
+        </label>
+        <button
+          onClick={upload}
           disabled={uploading}
-          onChange={(e) => e.target.files?.[0] && upload(e.target.files[0])}
-          className="text-sm text-foreground-muted file:mr-3 file:rounded file:border-0 file:bg-accent/80 file:px-3 file:py-1.5 file:text-sm file:text-background hover:file:bg-accent-strong"
-        />
-        {uploading && <span className="text-sm text-foreground-muted">Uploading…</span>}
+          className="rounded border border-accent/30 px-3 py-1.5 text-sm text-accent hover:bg-accent/10 disabled:opacity-50"
+        >
+          {uploading ? "Uploading…" : "Upload"}
+        </button>
       </div>
       {error && <p className="text-sm text-red-700">{error}</p>}
 
@@ -261,18 +279,18 @@ export function WorkshopDashboard({
       <AnimatePresence>
         {openDoc && (
           <motion.div
-            className="fixed inset-0 z-50 flex justify-end bg-black/50"
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4 md:p-8"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
             onClick={() => setOpenId(null)}
           >
             <motion.div
-              className="flex h-full w-full max-w-5xl flex-col bg-background shadow-2xl"
-              initial={{ x: "100%" }}
-              animate={{ x: 0 }}
-              exit={{ x: "100%" }}
-              transition={{ type: "spring", damping: 28, stiffness: 260 }}
+              className="flex h-full w-full max-w-[1600px] flex-col overflow-hidden rounded-xl bg-background shadow-2xl"
+              initial={{ opacity: 0, scale: 0.97 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.97 }}
+              transition={{ type: "spring", damping: 30, stiffness: 300 }}
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between border-b border-accent/15 px-5 py-3">
@@ -290,74 +308,64 @@ export function WorkshopDashboard({
                 </button>
               </div>
 
+              <div className="flex flex-wrap items-center gap-3 border-b border-accent/15 bg-surface px-5 py-2.5 text-sm">
+                {openAtsNotes && (
+                  <span className={openAtsNotes.ok ? "text-accent" : "text-red-700"}>
+                    {openAtsNotes.ok ? "✓ ATS check passed" : `✕ ATS issues: ${openAtsNotes.missingSections.join(", ")}`}
+                  </span>
+                )}
+                <button
+                  onClick={() => rescan(openDoc.id)}
+                  disabled={busyIds.has(openDoc.id)}
+                  className="rounded border border-accent/30 px-3 py-1 text-xs text-accent hover:bg-accent/10 disabled:opacity-50"
+                >
+                  {busyIds.has(openDoc.id) ? "Scanning…" : "Re-scan ATS"}
+                </button>
+                {openDoc.latex !== null && (
+                  <button
+                    onClick={() => recompile(openDoc.id)}
+                    disabled={busyIds.has(openDoc.id) || draftLatex === openDoc.latex}
+                    className="rounded bg-accent px-3 py-1 text-xs text-background hover:bg-accent-strong disabled:opacity-50"
+                  >
+                    {busyIds.has(openDoc.id) ? "Recompiling…" : "Save & recompile"}
+                  </button>
+                )}
+                <div className="ml-auto flex items-center gap-3">
+                  {!openDoc.active && (
+                    <button onClick={() => activate(openDoc.id)} className="text-xs text-accent underline">
+                      Set active
+                    </button>
+                  )}
+                  <button onClick={() => remove(openDoc.id)} className="text-xs text-red-700 underline">
+                    Delete
+                  </button>
+                </div>
+              </div>
+
+              {/* Overleaf-style split: source on the left, rendered PDF on the right, both full height. */}
               <div className="flex min-h-0 flex-1">
-                <div className="min-w-0 flex-1 border-r border-accent/15 bg-surface">
+                <div className="flex min-w-0 flex-1 flex-col border-r border-accent/15">
+                  {openDoc.latex !== null ? (
+                    <textarea
+                      value={draftLatex}
+                      onChange={(e) => setDraftLatex(e.target.value)}
+                      spellCheck={false}
+                      className="h-full w-full resize-none bg-surface p-4 font-mono text-xs leading-relaxed text-foreground focus:outline-none"
+                    />
+                  ) : (
+                    <div className="flex h-full items-center justify-center p-6 text-center text-sm text-foreground-muted">
+                      No LaTeX source on this document — it predates the .tex-required upload flow. Delete and re-upload with a
+                      .tex file to edit it here.
+                    </div>
+                  )}
+                </div>
+                <div className="min-w-0 flex-1 bg-surface">
                   <embed
                     key={pdfReloadToken}
                     src={`/api/workshop/documents?id=${openDoc.id}&t=${pdfReloadToken}`}
                     type="application/pdf"
                     className="h-full w-full"
                   />
-                </div>
-
-                <div className="flex w-full max-w-sm flex-col gap-4 overflow-y-auto p-4">
-                  {openAtsNotes && (
-                    <div
-                      className={`rounded border p-3 text-sm ${
-                        openAtsNotes.ok ? "border-pop/40 bg-pop-tint text-foreground" : "border-red-700/40 bg-red-50 text-red-800"
-                      }`}
-                    >
-                      <p className="font-medium">{openAtsNotes.ok ? "ATS check passed" : "ATS check failed"}</p>
-                      {!openAtsNotes.ok && (
-                        <ul className="mt-1 list-inside list-disc">
-                          {openAtsNotes.missingSections.map((s) => (
-                            <li key={s}>{s}</li>
-                          ))}
-                        </ul>
-                      )}
-                    </div>
-                  )}
-                  <button
-                    onClick={() => rescan(openDoc.id)}
-                    disabled={busyIds.has(openDoc.id)}
-                    className="w-fit rounded border border-accent/30 px-3 py-1.5 text-sm text-accent hover:bg-accent/10 disabled:opacity-50"
-                  >
-                    {busyIds.has(openDoc.id) ? "Scanning…" : "Re-scan ATS"}
-                  </button>
-
-                  {openDoc.latex !== null ? (
-                    <div className="flex flex-col gap-2">
-                      <p className="text-sm font-medium text-foreground">Edit wording (LaTeX source)</p>
-                      <textarea
-                        value={draftLatex}
-                        onChange={(e) => setDraftLatex(e.target.value)}
-                        rows={16}
-                        className="rounded border border-accent/30 bg-surface p-2 font-mono text-xs text-foreground"
-                      />
-                      <button
-                        onClick={() => recompile(openDoc.id)}
-                        disabled={busyIds.has(openDoc.id) || draftLatex === openDoc.latex}
-                        className="w-fit rounded bg-accent px-3 py-1.5 text-sm text-background hover:bg-accent-strong disabled:opacity-50"
-                      >
-                        {busyIds.has(openDoc.id) ? "Recompiling…" : "Save & recompile"}
-                      </button>
-                    </div>
-                  ) : (
-                    <p className="text-sm text-foreground-muted">
-                      This was uploaded directly — no LaTeX source to edit in place. Delete and upload a revised PDF instead.
-                    </p>
-                  )}
-
-                  <div className="mt-auto flex gap-3 border-t border-accent/15 pt-3">
-                    {!openDoc.active && (
-                      <button onClick={() => activate(openDoc.id)} className="text-sm text-accent underline">
-                        Set active
-                      </button>
-                    )}
-                    <button onClick={() => remove(openDoc.id)} className="text-sm text-red-700 underline">
-                      Delete
-                    </button>
-                  </div>
                 </div>
               </div>
             </motion.div>
