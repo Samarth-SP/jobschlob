@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, jsonb, integer, serial, index, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, jsonb, integer, serial, index, uniqueIndex, boolean } from "drizzle-orm/pg-core";
 
 export const jobs = pgTable("jobs", {
   id: text("id").primaryKey(), // dedupe hash, see lib/dedupe.ts
@@ -74,7 +74,17 @@ export const documents = pgTable("documents", {
   // Nullable: a resume/cover letter can be general-purpose or tailored to one job.
   jobId: text("job_id").references(() => jobs.id, { onDelete: "set null" }),
   kind: text("kind").notNull(), // 'resume' | 'cover_letter'
-  latex: text("latex").notNull(),
+  // 'generated' (workshop scaffold, has latex/no blobUrl) | 'uploaded' (a PDF the user brought
+  // in themselves, has blobUrl/no latex) — see lib/latex.ts vs the /api/workshop/upload route.
+  source: text("source").notNull().default("generated"),
+  latex: text("latex"), // null for uploaded docs — no LaTeX source to recompile from
+  // Vercel Blob pathname (private store) for an uploaded PDF — see lib/blob-storage.ts. Null for
+  // generated docs, which stay cheap to recompile on demand instead of also storing the PDF.
+  blobUrl: text("blob_url"),
+  filename: text("filename"), // original upload filename, null for generated docs
+  // The resume/cover letter currently in active use, one at a time per (userId, kind) — enforced
+  // in queries.ts's setActiveDocument, not here (a partial unique index needs raw SQL either way).
+  active: boolean("active").notNull().default(false),
   // { ok: boolean, missingSections: string[], extractedPreview: string } — see lib/ats-check.ts
   atsNotes: jsonb("ats_notes"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
