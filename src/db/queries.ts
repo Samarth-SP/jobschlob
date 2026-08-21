@@ -1,7 +1,8 @@
-import { eq, and, desc, sql, avg, count, inArray, gte } from "drizzle-orm";
+import { eq, and, or, desc, sql, avg, count, inArray, gte, isNotNull } from "drizzle-orm";
 import { db } from "./client";
 import { jobs, trackedJobs, profiles, jobMatches, applicationEvents, documents } from "./schema";
 import type { DashboardFilters } from "@/lib/dashboard-filters";
+import { BOARD_RETENTION_DAYS } from "@/lib/board-retention";
 
 // Every function below takes userId first and filters on it — jobs is the one shared,
 // non-user-scoped table (the board), touched only by upsertJobs from the ingest script.
@@ -9,12 +10,19 @@ import type { DashboardFilters } from "@/lib/dashboard-filters";
 // New jobs ranked by keyword-match compatibility score (jobMatches, populated by
 // scripts/ingest.ts). Unscored jobs (not yet matched, or the user has no profile) sort after
 // scored ones by createdAt, so this doesn't depend on ingest's match-scoring pass having run yet.
+//
+// A job tracked by ANY user is exempt from ingest's prune step (see scripts/ingest.ts), so the
+// jobs table alone can hold postings well past the retention window. Without the age/tracked
+// filter below, every other user would keep seeing that job as "new" indefinitely — it should
+// only still be visible to the user who actually tracked it.
 export async function getRankedBoard(userId: string) {
+  const cutoff = new Date(Date.now() - BOARD_RETENTION_DAYS * 24 * 60 * 60 * 1000);
   const rows = await db
     .select({ job: jobs, status: trackedJobs.status, score: jobMatches.score, rationale: jobMatches.rationale })
     .from(jobs)
     .leftJoin(trackedJobs, and(eq(trackedJobs.jobId, jobs.id), eq(trackedJobs.userId, userId)))
     .leftJoin(jobMatches, and(eq(jobMatches.jobId, jobs.id), eq(jobMatches.userId, userId)))
+    .where(or(gte(jobs.createdAt, cutoff), isNotNull(trackedJobs.status)))
     .orderBy(sql`${jobMatches.score} DESC NULLS LAST`, desc(jobs.createdAt));
 
   return rows.map((r) => ({ ...r.job, status: r.status, score: r.score, rationale: r.rationale }));

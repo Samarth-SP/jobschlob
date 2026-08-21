@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { auth } from "@/lib/auth";
-import { getRankedBoard, getTrackedJobsWithHistory, getAvgMatchScore, getFilters, getProfile } from "@/db/queries";
+import { getRankedBoard, getTrackedJobsWithHistory, getFilters, getProfile } from "@/db/queries";
 import { NewJobsSection } from "@/components/NewJobsSection";
 import { ProfileCard } from "@/components/ProfileCard";
 import { StatTiles } from "@/components/StatTiles";
@@ -13,10 +13,9 @@ export default async function DashboardPage() {
   }
   const userId = session.user.email;
 
-  const [board, tracked, avgMatch, filters, background] = await Promise.all([
+  const [board, tracked, filters, background] = await Promise.all([
     getRankedBoard(userId),
     getTrackedJobsWithHistory(userId),
-    getAvgMatchScore(userId),
     getFilters(userId),
     getProfile(userId),
   ]);
@@ -42,17 +41,6 @@ export default async function DashboardPage() {
         <div className="flex min-w-0 flex-col gap-4">
           <ProfileCard email={userId} background={background} />
           <StatTiles tracked={tracked} />
-          {avgMatch.overall !== null && (
-            <div className="rounded-xl border border-accent/15 bg-pop-tint p-4">
-              <p className="mb-1 text-[10px] font-medium uppercase tracking-widest text-foreground-muted/70">
-                Avg match score
-              </p>
-              <p className="text-2xl font-semibold text-foreground">
-                {Math.round(avgMatch.overall)}
-                <span className="text-sm font-normal text-foreground-muted"> / 100</span>
-              </p>
-            </div>
-          )}
         </div>
 
         <div className="flex min-w-0 flex-col gap-8">
