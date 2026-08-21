@@ -5,6 +5,23 @@
 \usepackage{titlesec}
 \usepackage{xcolor}
 \usepackage{hyperref}
+% Packages beyond our own house-style template (above) — widened to also warm the cache for the
+% single most common family of externally-authored LaTeX resumes people upload (the "Jake's
+% Resume" template and its many forks: latexsym/fullpage/marvosym/color/verbatim/fancyhdr/
+% babel/tabularx). Doesn't make every possible external .tex compile — that template usually also
+% \input{glyphtounicode}, which calls the pdfTeX-only \pdfglyphtounicode primitive the moment it
+% loads. Tectonic's engine doesn't implement that primitive at all, so there's no cache-warming
+% fix for it, not even caching glyphtounicode.tex itself (tried — it crashes THIS build, not just
+% an uploader's). That one stays a hard, documented limitation. Everything below it isn't.
+\usepackage{latexsym}
+\usepackage{fullpage}
+\usepackage{marvosym}
+\usepackage{color}
+\usepackage{verbatim}
+\usepackage{fancyhdr}
+\usepackage[english]{babel}
+\usepackage{tabularx}
+\usepackage{charter} % that template's default font choice — its own font files, warmed too
 \titleformat{\section}{\bfseries\large}{}{0em}{}[\titlerule]
 \begin{document}
 \begin{center}
