@@ -21,7 +21,7 @@ type Job = {
   rationale: string | null;
 };
 
-const CATEGORY_LABELS: Record<string, string> = { tech: "Tech", consulting: "Consulting", vc_pe: "VC/PE" };
+const CATEGORY_LABELS: Record<string, string> = { tech: "Tech", consulting: "Consulting", vc_pe: "VC/PE", robotics: "Robotics" };
 const LEVEL_LABELS: Record<string, string> = { internship: "Internship", new_grad: "New grad" };
 
 function toggle(list: string[], value: string): string[] {
