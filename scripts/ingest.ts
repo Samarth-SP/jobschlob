@@ -285,13 +285,18 @@ async function main() {
   // Any user tracking a job (selectDistinct over trackedJobs, no userId filter) keeps it alive
   // past the retention window — never let pruning pull a row out from under someone's
   // application history.
+  //
+  // Keyed on postedAt (real posting date), not createdAt (when we happened to first ingest it) —
+  // a source can surface a listing to us well after it actually went up, and pruning by ingest
+  // time let those postings sit on the board indefinitely just because we kept re-seeing them.
+  // Matches getRankedBoard's sort in queries.ts, which made the same switch for the same reason.
   const cutoff = new Date(Date.now() - BOARD_RETENTION_DAYS * 24 * 60 * 60 * 1000);
   const tracked = await db.selectDistinct({ id: trackedJobs.jobId }).from(trackedJobs);
   const deleted = await db
     .delete(jobs)
-    .where(and(lt(jobs.createdAt, cutoff), notInArray(jobs.id, tracked.length ? tracked.map((t) => t.id) : [""])))
+    .where(and(lt(jobs.postedAt, cutoff), notInArray(jobs.id, tracked.length ? tracked.map((t) => t.id) : [""])))
     .returning({ id: jobs.id });
-  if (deleted.length) console.log(`pruned ${deleted.length} jobs older than ${BOARD_RETENTION_DAYS} days`);
+  if (deleted.length) console.log(`pruned ${deleted.length} jobs posted more than ${BOARD_RETENTION_DAYS} days ago`);
 }
 
 main().catch((err) => {

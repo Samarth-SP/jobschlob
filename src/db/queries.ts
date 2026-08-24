@@ -7,9 +7,14 @@ import { BOARD_RETENTION_DAYS } from "@/lib/board-retention";
 // Every function below takes userId first and filters on it — jobs is the one shared,
 // non-user-scoped table (the board), touched only by upsertJobs from the ingest script.
 
-// New jobs sorted by recency first, keyword-match compatibility score (jobMatches, populated by
-// scripts/ingest.ts) as the tiebreaker within same-day postings — a great match from three weeks
-// ago is still less actionable than something that just went up.
+// New jobs sorted strictly by posting date first (day granularity — see the date_trunc below),
+// keyword-match compatibility score (jobMatches, populated by scripts/ingest.ts) breaking ties
+// within the same day. Deliberately postedAt (when the job was actually posted), not createdAt
+// (when our ingest happened to first see it) — a source can surface a listing to us weeks after
+// it went up (feed lag, a board we only just started tracking, a listing re-activating), and
+// sorting/pruning by createdAt let those stale-by-real-world-date postings sort as if brand new.
+// Confirmed against production data: a job actually posted 2.5 months earlier was sorting first
+// because we'd only ingested it that day.
 //
 // A job tracked by ANY user is exempt from ingest's prune step (see scripts/ingest.ts), so the
 // jobs table alone can hold postings well past the retention window. Without the age/tracked
@@ -22,8 +27,8 @@ export async function getRankedBoard(userId: string) {
     .from(jobs)
     .leftJoin(trackedJobs, and(eq(trackedJobs.jobId, jobs.id), eq(trackedJobs.userId, userId)))
     .leftJoin(jobMatches, and(eq(jobMatches.jobId, jobs.id), eq(jobMatches.userId, userId)))
-    .where(or(gte(jobs.createdAt, cutoff), isNotNull(trackedJobs.status)))
-    .orderBy(desc(jobs.createdAt), sql`${jobMatches.score} DESC NULLS LAST`);
+    .where(or(gte(jobs.postedAt, cutoff), isNotNull(trackedJobs.status)))
+    .orderBy(sql`date_trunc('day', ${jobs.postedAt}) DESC NULLS LAST`, sql`${jobMatches.score} DESC NULLS LAST`);
 
   return rows.map((r) => ({ ...r.job, status: r.status, score: r.score, rationale: r.rationale }));
 }
