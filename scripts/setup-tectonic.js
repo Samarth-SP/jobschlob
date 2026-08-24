@@ -65,7 +65,18 @@ function extractTarBinary(buf, outPath) {
   throw new Error("No regular file found in tectonic tarball");
 }
 
+// .tectonic-cache is committed to the repo (see .gitignore) specifically so a build never has to
+// depend on relay.fullyjustified.net (Tectonic's bundle CDN) being reachable — it has 403'd
+// Vercel's build machine before, a real outage this sidesteps entirely. So: skip re-warming (and
+// the network calls that go with it) whenever a checkout already has a populated cache; only hit
+// the network when it's genuinely missing (a fresh clone before the first local run). Widening
+// scripts/fixture.tex's package list means re-running this locally and committing the diff.
 function warmCache() {
+  const dataDir = path.join(CACHE_DIR, "bundles", "data");
+  if (fs.existsSync(dataDir) && fs.readdirSync(dataDir).length > 0) {
+    console.log("Tectonic package cache already warmed (committed) — skipping.");
+    return;
+  }
   fs.mkdirSync(CACHE_DIR, { recursive: true });
   console.log("Pre-warming Tectonic package cache...");
   execFileSync(BIN_PATH, ["--outdir", CACHE_DIR, path.join(__dirname, "fixture.tex")], {
