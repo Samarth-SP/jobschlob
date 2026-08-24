@@ -43,6 +43,11 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# tectonic (downloaded + cache-warmed at build time)
+# tectonic binary — platform-specific, downloaded fresh per build from GitHub releases (see
+# scripts/setup-tectonic.js). .tectonic-cache is intentionally NOT ignored — it's plain TeX
+# data/font files (portable, not compiled), and warming it fresh at build time depends on
+# relay.fullyjustified.net (Tectonic's bundle CDN), which has 403'd Vercel's build machine before
+# — a real production outage, not a hypothetical. Committing the warmed cache means a build never
+# needs that CDN to be reachable at all. Re-run `node scripts/setup-tectonic.js` and commit the
+# diff whenever scripts/fixture.tex's package list changes.
 /bin
-/.tectonic-cache
