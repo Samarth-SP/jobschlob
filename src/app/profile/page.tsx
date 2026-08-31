@@ -1,7 +1,7 @@
 import { auth } from "@/lib/auth";
 import { getProfile, setProfile, getJobsSince, saveJobMatches } from "@/db/queries";
 import { scoreJobForUser } from "@/lib/match";
-import { BOARD_RETENTION_DAYS } from "@/lib/board-retention";
+import { EXTENDED_RETENTION_DAYS } from "@/lib/company-tier";
 import { revalidatePath } from "next/cache";
 import { ProfileForm, type SaveResult } from "@/components/ProfileForm";
 
@@ -27,7 +27,7 @@ export default async function ProfilePage() {
     // scorer only looks at a job's own title/company tokens, so a background edit often doesn't
     // move the number at all, which otherwise reads as "nothing happened."
     if (!background.trim()) return { rescored: 0 };
-    const cutoff = new Date(Date.now() - BOARD_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+    const cutoff = new Date(Date.now() - EXTENDED_RETENTION_DAYS * 24 * 60 * 60 * 1000);
     const recentJobs = await getJobsSince(cutoff);
     const matches = recentJobs.flatMap((job) => {
       const result = scoreJobForUser(job, background);

@@ -1,68 +1,167 @@
-// House-style LaTeX exemplars used as few-shot references for the LLM scaffold — it writes a
-// complete new .tex document in this style rather than filling rigid placeholders, which
-// survives varying content length better. Packages are deliberately limited to the set already
-// warmed into the Tectonic cache at build time (see scripts/fixture.tex) so a real generation
-// never needs a network fetch for an uncached package.
-export const RESUME_EXEMPLAR = String.raw`\documentclass[11pt]{article}
-\usepackage[margin=0.75in]{geometry}
+// The workshop fills these fixed LaTeX skeletons from structured content the LLM returns (see
+// resume-scaffold.ts) instead of having the model emit LaTeX directly — left to write raw LaTeX
+// it reliably produced valid-but-two-page, off-house-style documents. Layout, spacing, fonts and
+// the package set all live here and never vary; the model only supplies text, which is then
+// LaTeX-escaped here (so a stray & or % in someone's job title can't break the compile).
+//
+// Packages are limited to the set warmed into the Tectonic cache at build time
+// (scripts/fixture.tex) so a generation never needs a network fetch.
+
+export type ResumeEntry = {
+  title: string;
+  organization: string;
+  location?: string;
+  dates: string;
+  bullets: string[]; // ordered strongest-first; the one-page fitter drops trailing ones
+};
+
+export type ResumeEducation = {
+  degree: string;
+  school: string;
+  dates: string;
+  details?: string;
+};
+
+export type ResumeData = {
+  name: string;
+  contact: string[]; // email / phone / links / city — rendered • separated, links auto-detected
+  summary?: string;
+  skills: string[];
+  experience: ResumeEntry[];
+  projects?: ResumeEntry[];
+  education: ResumeEducation[];
+};
+
+export type CoverLetterData = {
+  sender: string;
+  senderContact: string[];
+  recipient: string; // "Hiring Team, Acme Corp"
+  greeting: string; // "Dear Hiring Team,"
+  paragraphs: string[]; // body; the fitter drops the last if it overflows
+  closing: string; // "Sincerely,"
+};
+
+const ESCAPES: Record<string, string> = {
+  "\\": "\\textbackslash{}",
+  "&": "\\&",
+  "%": "\\%",
+  $: "\\$",
+  "#": "\\#",
+  _: "\\_",
+  "{": "\\{",
+  "}": "\\}",
+  "~": "\\textasciitilde{}",
+  "^": "\\textasciicircum{}",
+};
+
+function esc(s: string | undefined): string {
+  return (s ?? "").replace(/[\\&%$#_{}~^]/g, (c) => ESCAPES[c]);
+}
+
+// A contact token that looks like a bare URL/handle ("github.com/x") becomes a clickable link;
+// everything else (emails, phone numbers, "City, ST") renders as plain escaped text.
+function renderContact(token: string): string {
+  const t = (token ?? "").trim();
+  const isUrl = !t.includes("@") && /^(https?:\/\/)?([\w-]+\.)+[a-z]{2,}(\/\S*)?$/i.test(t);
+  if (!isUrl) return esc(t);
+  const href = t.startsWith("http") ? t : `https://${t}`;
+  return `\\href{${href.replace(/([#%\\])/g, "\\$1")}}{${esc(t.replace(/^https?:\/\//, ""))}}`;
+}
+
+function itemize(bullets: string[] | undefined): string {
+  const items = (bullets ?? []).filter((b) => b && b.trim()).map((b) => `  \\item ${esc(b.trim())}`);
+  return items.length ? `\\begin{itemize}\n${items.join("\n")}\n\\end{itemize}` : "";
+}
+
+function entryBlock(e: ResumeEntry): string {
+  const head = `\\textbf{${esc(e.title)}}${e.organization ? `, ${esc(e.organization)}` : ""} \\hfill ${esc(e.dates)}`;
+  const loc = e.location ? `\\\\\n\\textit{${esc(e.location)}}` : "";
+  return `${head}${loc}\n${itemize(e.bullets)}`.trim();
+}
+
+const JOIN = "\n\n\\smallskip\n";
+
+const RESUME_PREAMBLE = String.raw`\documentclass[10pt]{article}
+\usepackage[margin=0.5in]{geometry}
 \usepackage[T1]{fontenc}
+\usepackage{XCharter}
 \usepackage{enumitem}
 \usepackage{titlesec}
 \usepackage{xcolor}
-\usepackage{hyperref}
-\titleformat{\section}{\bfseries\large}{}{0em}{}[\titlerule]
-\titlespacing{\section}{0pt}{1em}{0.5em}
-\begin{document}
-\begin{center}
-{\LARGE Jane Doe} \\
-jane@example.com \textbullet{} (555) 123-4567 \textbullet{} \href{https://github.com/janedoe}{github.com/janedoe}
-\end{center}
+\usepackage[hidelinks]{hyperref}
+\definecolor{sectionrule}{gray}{0.6}
+\titleformat{\section}{\bfseries\large}{}{0em}{}[{\color{sectionrule}\titlerule}]
+\titlespacing{\section}{0pt}{0.9em}{0.4em}
+\setlist[itemize]{leftmargin=1.3em, itemsep=1.5pt, topsep=2pt, parsep=0pt}
+\setlength{\parindent}{0pt}
+\pagenumbering{gobble}
+`;
 
-\section{Experience}
-\textbf{Senior Backend Engineer}, Acme Corp \hfill 2021--Present
-\begin{itemize}[leftmargin=*, itemsep=2pt]
-  \item Led migration of the payments service from a monolith to Go microservices, cutting p99 latency 40\%.
-  \item Designed the on-call runbook and alerting rules adopted across three teams.
-\end{itemize}
+export function renderResume(d: ResumeData): string {
+  const s: string[] = [];
+  const contact = (d.contact ?? []).map(renderContact).join(" \\textbullet{} ");
+  s.push(`\\begin{center}\n{\\LARGE \\textbf{${esc(d.name)}}}${contact ? `\\\\[2pt]\n${contact}` : ""}\n\\end{center}`);
+  if (d.summary?.trim()) s.push(esc(d.summary.trim()));
+  if (d.skills?.length) s.push(`\\section*{Skills}\n${d.skills.map(esc).join(", ")}`);
+  if (d.experience?.length) s.push(`\\section*{Experience}\n${d.experience.map(entryBlock).join(JOIN)}`);
+  if (d.projects?.length) s.push(`\\section*{Projects}\n${d.projects.map(entryBlock).join(JOIN)}`);
+  if (d.education?.length)
+    s.push(
+      `\\section*{Education}\n${d.education
+        .map(
+          (e) =>
+            `\\textbf{${esc(e.degree)}}, ${esc(e.school)} \\hfill ${esc(e.dates)}${
+              e.details ? `\\\\\n\\textit{${esc(e.details)}}` : ""
+            }`,
+        )
+        .join(JOIN)}`,
+    );
+  return `${RESUME_PREAMBLE}\\begin{document}\n${s.join("\n\n")}\n\\end{document}\n`;
+}
 
-\textbf{Software Engineer}, Beta Inc \hfill 2018--2021
-\begin{itemize}[leftmargin=*, itemsep=2pt]
-  \item Built the internal feature-flagging system used by every product team.
-\end{itemize}
-
-\section{Skills}
-Go, Python, Kubernetes, PostgreSQL, distributed systems, on-call/incident response
-
-\section{Education}
-B.S. Computer Science, State University, 2018
-\end{document}`;
-
-export const COVER_LETTER_EXEMPLAR = String.raw`\documentclass[11pt]{article}
+const COVER_PREAMBLE = String.raw`\documentclass[11pt]{article}
 \usepackage[margin=1in]{geometry}
 \usepackage[T1]{fontenc}
-\usepackage{hyperref}
-\begin{document}
-\noindent
-Jane Doe \\
-jane@example.com \textbullet{} (555) 123-4567
+\usepackage{XCharter}
+\usepackage[hidelinks]{hyperref}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{1em}
+\pagenumbering{gobble}
+`;
 
-\vspace{1em}
-\noindent
-Hiring Team, Acme Corp
+export function renderCoverLetter(d: CoverLetterData): string {
+  const contact = (d.senderContact ?? []).map(renderContact).join(" \\textbullet{} ");
+  const body = (d.paragraphs ?? [])
+    .filter((p) => p && p.trim())
+    .map((p) => esc(p.trim()))
+    .join("\n\n");
+  return `${COVER_PREAMBLE}\\begin{document}
+${esc(d.sender)}${contact ? `\\\\\n${contact}` : ""}
 
-\vspace{1em}
-\noindent
-Dear Hiring Team,
+${esc(d.recipient)}
 
-I'm writing to apply for the Senior Backend Engineer role at Acme Corp. In my current role I led
-the migration of our payments service to Go microservices, cutting p99 latency 40\% — the kind of
-systems work I understand Acme's platform team is tackling at larger scale.
+${esc(d.greeting)}
 
-I'd welcome the chance to talk about how my background in distributed systems and on-call
-ownership could contribute to your team.
+${body}
 
-\vspace{1em}
-\noindent
-Sincerely, \\
-Jane Doe
-\end{document}`;
+${esc(d.closing)}\\\\
+${esc(d.sender)}
+\\end{document}
+`;
+}
+
+// One-page fitter hooks: each removes the single lowest-priority piece and returns its text, or
+// null when nothing more can be cut. Both mutate the passed object.
+export function trimResume(d: ResumeData): string | null {
+  for (const pool of [d.projects ?? [], d.experience ?? []]) {
+    const target = [...pool]
+      .filter((e) => (e.bullets?.length ?? 0) > 1)
+      .sort((a, b) => b.bullets.length - a.bullets.length)[0];
+    if (target) return target.bullets.pop() ?? null;
+  }
+  return null;
+}
+
+export function trimCoverLetter(d: CoverLetterData): string | null {
+  return (d.paragraphs?.length ?? 0) > 2 ? d.paragraphs.pop() ?? null : null;
+}

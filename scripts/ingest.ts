@@ -1,12 +1,17 @@
 import { db } from "../src/db/client";
-import { upsertJobs, getAllProfiles, getMatchedJobIds, saveJobMatches } from "../src/db/queries";
+import {
+  upsertJobs,
+  getAllProfiles,
+  getMatchedJobIds,
+  saveJobMatches,
+  pastRetentionWindow,
+} from "../src/db/queries";
 import { jobId } from "../src/lib/dedupe";
 import { scoreJobForUser } from "../src/lib/match";
 import { classifyLevel } from "../src/lib/level-heuristic";
 import { classifyDegree, stripHtml } from "../src/lib/degree-heuristic";
-import { BOARD_RETENTION_DAYS } from "../src/lib/board-retention";
 import { jobs, trackedJobs } from "../src/db/schema";
-import { and, lt, notInArray } from "drizzle-orm";
+import { and, notInArray } from "drizzle-orm";
 
 type BoardCategory = "tech" | "consulting" | "vc_pe" | "robotics";
 
@@ -90,7 +95,7 @@ async function fetchGreenhouseBoard(board: (typeof GREENHOUSE_BOARDS)[number]) {
   const { jobs: listings }: { jobs: GreenhouseJob[] } = await res.json();
 
   return listings.flatMap((j) => {
-    const level = classifyLevel(j.title);
+    const level = classifyLevel(j.title, board.category === "robotics");
     if (!level) return [];
     return [
       {
@@ -129,7 +134,7 @@ async function fetchLeverBoard(board: (typeof LEVER_BOARDS)[number]) {
   const listings: LeverPosting[] = await res.json();
 
   return listings.flatMap((j) => {
-    const level = classifyLevel(j.text);
+    const level = classifyLevel(j.text, board.category === "robotics");
     if (!level) return [];
     return [
       {
@@ -168,7 +173,7 @@ async function fetchAshbyBoard(board: (typeof LEVER_BOARDS)[number]) {
 
   return listings.flatMap((j) => {
     if (!j.isListed) return [];
-    const level = classifyLevel(j.title);
+    const level = classifyLevel(j.title, board.category === "robotics");
     if (!level) return [];
     return [
       {
@@ -194,7 +199,8 @@ type SimplifyListing = {
   locations: string[];
   url: string;
   active: boolean;
-  date_posted: number; // unix seconds
+  date_posted: number; // unix seconds — original post date, frozen when Simplify first scraped it
+  date_updated?: number; // unix seconds — when Simplify last re-confirmed the listing is live
 };
 
 async function fetchSimplifyFeed(feed: (typeof SIMPLIFY_FEEDS)[number]) {
@@ -213,9 +219,15 @@ async function fetchSimplifyFeed(feed: (typeof SIMPLIFY_FEEDS)[number]) {
       location: l.locations?.length ? l.locations.join("; ") : null,
       url: l.url,
       source: `simplify:${feed.level}`,
-      category: "tech" as const,
+      category: "tech" as BoardCategory,
       level: feed.level,
-      postedAt: new Date(l.date_posted * 1000),
+      degreeLevel: null, // Simplify feeds carry no description text — see degree-heuristic.ts
+      // Newer of the two: Simplify surfaces a listing (top of their board, "Age" badge) by
+      // date_updated, and re-confirms only listings that are still open. Keying postedAt off the
+      // frozen date_posted alone pruned still-active roles Simplify had just re-surfaced out of
+      // the retention window. This also lets them sort as recent on the dashboard, deliberately —
+      // "still live per the source" is the freshness signal we want the board to reflect.
+      postedAt: new Date(Math.max(l.date_posted, l.date_updated ?? 0) * 1000),
     }));
 }
 
@@ -228,7 +240,7 @@ type IngestRow = typeof jobs.$inferInsert;
 function dedupeAcrossSources(rows: IngestRow[]): IngestRow[] {
   const groups = new Map<string, IngestRow[]>();
   for (const row of rows) {
-    const key = [row.company, row.title, row.location ?? ""].map((s) => s.trim().toLowerCase()).join("|");
+    const key = [row.company, row.title, row.location ?? ""].map((s) => (s ?? "").trim().toLowerCase()).join("|");
     const group = groups.get(key);
     if (group) group.push(row);
     else groups.set(key, [row]);
@@ -250,15 +262,17 @@ function dedupeAcrossSources(rows: IngestRow[]): IngestRow[] {
 }
 
 async function main() {
-  const fetched = (
-    await Promise.all([
-      ...GREENHOUSE_BOARDS.map(fetchGreenhouseBoard),
-      ...ROBOTICS_GREENHOUSE.map(fetchGreenhouseBoard),
-      ...LEVER_BOARDS.map(fetchLeverBoard),
-      ...ROBOTICS_ASHBY.map(fetchAshbyBoard),
-      ...SIMPLIFY_FEEDS.map(fetchSimplifyFeed),
-    ])
-  ).flat();
+  // allSettled, not all — one board 404ing or rate-limiting must not take down the whole run
+  // (every other source's jobs would silently fail to ingest).
+  const settled = await Promise.allSettled([
+    ...GREENHOUSE_BOARDS.map(fetchGreenhouseBoard),
+    ...ROBOTICS_GREENHOUSE.map(fetchGreenhouseBoard),
+    ...LEVER_BOARDS.map(fetchLeverBoard),
+    ...ROBOTICS_ASHBY.map(fetchAshbyBoard),
+    ...SIMPLIFY_FEEDS.map(fetchSimplifyFeed),
+  ]);
+  for (const r of settled) if (r.status === "rejected") console.error(`source failed: ${r.reason}`);
+  const fetched: IngestRow[] = settled.flatMap((r) => (r.status === "fulfilled" ? r.value : []));
   const rows = dedupeAcrossSources(fetched);
   await upsertJobs(rows);
   console.log(
@@ -282,21 +296,17 @@ async function main() {
   }
   if (profiles.length) console.log(`scored ${scored} job matches across ${profiles.length} profile(s)`);
 
-  // Any user tracking a job (selectDistinct over trackedJobs, no userId filter) keeps it alive
-  // past the retention window — never let pruning pull a row out from under someone's
-  // application history.
-  //
-  // Keyed on postedAt (real posting date), not createdAt (when we happened to first ingest it) —
-  // a source can surface a listing to us well after it actually went up, and pruning by ingest
-  // time let those postings sit on the board indefinitely just because we kept re-seeing them.
-  // Matches getRankedBoard's sort in queries.ts, which made the same switch for the same reason.
-  const cutoff = new Date(Date.now() - BOARD_RETENTION_DAYS * 24 * 60 * 60 * 1000);
+  // Prune anything past its retention window (pastRetentionWindow() in queries.ts — the exact
+  // inverse of what getRankedBoard shows, so the board and the DB agree). Window is keyed on
+  // postedAt (real posting date, not ingest time) and is longer for the exclusivity-clause
+  // companies in company-tier.ts. Any job a user tracks is exempt — never pull a row out from
+  // under someone's application history.
   const tracked = await db.selectDistinct({ id: trackedJobs.jobId }).from(trackedJobs);
   const deleted = await db
     .delete(jobs)
-    .where(and(lt(jobs.postedAt, cutoff), notInArray(jobs.id, tracked.length ? tracked.map((t) => t.id) : [""])))
+    .where(and(pastRetentionWindow(), notInArray(jobs.id, tracked.length ? tracked.map((t) => t.id) : [""])))
     .returning({ id: jobs.id });
-  if (deleted.length) console.log(`pruned ${deleted.length} jobs posted more than ${BOARD_RETENTION_DAYS} days ago`);
+  if (deleted.length) console.log(`pruned ${deleted.length} jobs past their retention window`);
 }
 
 main().catch((err) => {

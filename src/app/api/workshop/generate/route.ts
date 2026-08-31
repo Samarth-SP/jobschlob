@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getProfile, getJobById, saveDocument, setActiveDocument } from "@/db/queries";
-import { generateResumeLatex, generateCoverLetterLatex } from "@/lib/resume-scaffold";
-import { compileLatex, LatexCompileError } from "@/lib/latex";
-import { checkAts } from "@/lib/ats-check";
+import { buildResume, buildCoverLetter } from "@/lib/resume-scaffold";
+import { LatexCompileError } from "@/lib/latex";
 import { uploadDocumentPdf } from "@/lib/blob-storage";
 
 export const runtime = "nodejs";
@@ -24,22 +23,20 @@ export async function POST(req: Request) {
 
   const job = jobId ? await getJobById(jobId) : null;
 
-  const generatedLatex =
-    kind === "cover_letter"
-      ? await generateCoverLetterLatex(background, job ? { title: job.title, company: job.company } : { title: "the role", company: "the company" })
-      : await generateResumeLatex(background, job ? `${job.title} at ${job.company}` : undefined);
-
-  // The LLM's own output is well-behaved almost always (it's prompted with a working exemplar),
-  // but not guaranteed — same clean-error treatment as the recompile path rather than an uncaught
-  // 500 with an empty body.
-  let pdf: Buffer, latex: string, warnings: string[];
+  // The model returns structured content (never LaTeX); lib/resume-scaffold.ts fills the fixed
+  // house template and runs a compile → count-pages → trim loop until it fits one page. A
+  // LatexCompileError here would mean the template itself is broken — surface it cleanly rather
+  // than as an uncaught 500.
+  let pdf: Buffer, latex: string, warnings: string[], atsNotes;
   try {
-    ({ pdf, source: latex, warnings } = await compileLatex(generatedLatex));
+    ({ latex, pdf, warnings, atsNotes } =
+      kind === "cover_letter"
+        ? await buildCoverLetter(background, job ? { title: job.title, company: job.company } : { title: "the role", company: "the company" })
+        : await buildResume(background, job ? `${job.title} at ${job.company}` : undefined));
   } catch (err) {
     if (err instanceof LatexCompileError) return NextResponse.json({ error: `Generation produced invalid LaTeX: ${err.message}` }, { status: 502 });
     throw err;
   }
-  const atsNotes = await checkAts(pdf, kind);
 
   // Stored alongside latex (not just recompiled on demand) so a generated document lives in the
   // document library exactly like an uploaded one — same panel, same viewer, same re-scan path —

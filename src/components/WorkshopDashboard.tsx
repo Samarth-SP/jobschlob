@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 
-type AtsNotes = { ok: boolean; missingSections: string[]; extractedPreview: string } | null;
+type AtsNotes = { ok: boolean; missingSections: string[]; extractedPreview: string; pageCount?: number } | null;
 
 type Doc = {
   id: number;
@@ -233,50 +233,71 @@ export function WorkshopDashboard({
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-3 rounded border border-dashed border-accent/40 bg-surface p-4">
-        <select
-          value={kind}
-          onChange={(e) => setKind(e.target.value as "resume" | "cover_letter")}
-          className="rounded border border-accent/30 bg-background px-2 py-1.5 text-sm text-foreground"
-        >
-          <option value="resume">Resume</option>
-          <option value="cover_letter">Cover letter</option>
-        </select>
-        <select
-          value={jobId}
-          onChange={(e) => setJobId(e.target.value)}
-          className="rounded border border-accent/30 bg-background px-2 py-1.5 text-sm text-foreground"
-        >
-          <option value="">General (no specific job)</option>
-          {jobs.map((j) => (
-            <option key={j.id} value={j.id}>
-              {j.title} — {j.company}
-            </option>
-          ))}
-        </select>
-        <button
-          onClick={generate}
-          disabled={generating}
-          className="rounded bg-accent px-4 py-1.5 text-sm text-background hover:bg-accent-strong disabled:opacity-50"
-        >
-          {generating ? "Generating…" : "Generate"}
-        </button>
-        <span className="text-foreground-muted">or bring your own —</span>
-        <label className="flex items-center gap-1.5 text-sm text-foreground-muted">
-          .tex (required)
-          <input ref={texInput} type="file" accept=".tex" disabled={uploading} className="text-xs" />
-        </label>
-        <label className="flex items-center gap-1.5 text-sm text-foreground-muted">
-          .pdf (optional — we'll compile the .tex if you skip this)
-          <input ref={pdfInput} type="file" accept="application/pdf" disabled={uploading} className="text-xs" />
-        </label>
-        <button
-          onClick={upload}
-          disabled={uploading}
-          className="rounded border border-accent/30 px-3 py-1.5 text-sm text-accent hover:bg-accent/10 disabled:opacity-50"
-        >
-          {uploading ? "Uploading…" : "Upload"}
-        </button>
+      <div className="flex flex-col gap-4 rounded border border-dashed border-accent/40 bg-surface p-4">
+        <div className="flex flex-wrap items-center gap-3">
+          <select
+            value={kind}
+            onChange={(e) => setKind(e.target.value as "resume" | "cover_letter")}
+            className="rounded border border-accent/30 bg-background px-2 py-1.5 text-sm text-foreground"
+          >
+            <option value="resume">Resume</option>
+            <option value="cover_letter">Cover letter</option>
+          </select>
+          <select
+            value={jobId}
+            onChange={(e) => setJobId(e.target.value)}
+            className="rounded border border-accent/30 bg-background px-2 py-1.5 text-sm text-foreground"
+          >
+            <option value="">General (no specific job)</option>
+            {jobs.map((j) => (
+              <option key={j.id} value={j.id}>
+                {j.title} — {j.company}
+              </option>
+            ))}
+          </select>
+          <button
+            onClick={generate}
+            disabled={generating}
+            className="rounded bg-accent px-4 py-1.5 text-sm font-medium text-background hover:bg-accent-strong disabled:opacity-50"
+          >
+            {generating ? "Generating…" : "Generate"}
+          </button>
+        </div>
+
+        <div className="flex flex-col gap-2 border-t border-accent/15 pt-3">
+          <span className="text-xs font-medium uppercase tracking-wide text-foreground-muted">Or bring your own</span>
+          <div className="flex flex-wrap items-center gap-3">
+            <label className="flex flex-col gap-1 text-xs text-foreground-muted">
+              <span>
+                LaTeX source <span className="text-accent">(required)</span>
+              </span>
+              <input
+                ref={texInput}
+                type="file"
+                accept=".tex"
+                disabled={uploading}
+                className="max-w-[15rem] text-xs text-foreground file:mr-3 file:cursor-pointer file:rounded file:border-0 file:bg-accent file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-background hover:file:bg-accent-strong disabled:opacity-50"
+              />
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-foreground-muted">
+              <span>PDF (optional — we compile the .tex otherwise)</span>
+              <input
+                ref={pdfInput}
+                type="file"
+                accept="application/pdf"
+                disabled={uploading}
+                className="max-w-[15rem] text-xs text-foreground file:mr-3 file:cursor-pointer file:rounded file:border file:border-accent/40 file:bg-accent/10 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-accent hover:file:bg-accent/20 disabled:opacity-50"
+              />
+            </label>
+            <button
+              onClick={upload}
+              disabled={uploading}
+              className="self-end rounded border border-accent/40 px-4 py-1.5 text-sm font-medium text-accent hover:bg-accent/10 disabled:opacity-50"
+            >
+              {uploading ? "Uploading…" : "Upload"}
+            </button>
+          </div>
+        </div>
       </div>
       {/* Fixed above the panel's z-50 overlay — an action taken inside the panel (recompile,
           rescan) needs its error visible while the panel is open, not hidden behind it until
@@ -365,6 +386,11 @@ export function WorkshopDashboard({
                 {openAtsNotes && (
                   <span className={openAtsNotes.ok ? "text-accent" : "text-red-700"}>
                     {openAtsNotes.ok ? "✓ ATS check passed" : `✕ ATS issues: ${openAtsNotes.missingSections.join(", ")}`}
+                  </span>
+                )}
+                {openAtsNotes?.pageCount != null && (
+                  <span className={openAtsNotes.pageCount > 1 ? "text-red-700" : "text-foreground-muted"}>
+                    {openAtsNotes.pageCount} {openAtsNotes.pageCount === 1 ? "page" : "pages"}
                   </span>
                 )}
                 <button

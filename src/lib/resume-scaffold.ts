@@ -1,67 +1,199 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { RESUME_EXEMPLAR, COVER_LETTER_EXEMPLAR } from "./resume-template";
+import {
+  type ResumeData,
+  type CoverLetterData,
+  renderResume,
+  renderCoverLetter,
+  trimResume,
+  trimCoverLetter,
+} from "./resume-template";
+import { compileLatex } from "./latex";
+import { checkAts, type AtsNotes } from "./ats-check";
 
 const client = new Anthropic();
 
-const ALLOWED_PACKAGES =
-  "geometry, fontenc (T1), enumitem, titlesec, xcolor, hyperref — the same packages used in the example, already available offline. Do not use any other package.";
-
 // Prompt-only anti-fabrication is a soft guardrail, not a guarantee (there's no mechanical check
-// on the output against the background the way a real ATS pipeline would want — see CLAUDE.md's
-// Scoring section for why that tradeoff was made here). Added after this exact model invented a
-// plausible-looking phone number, email, and GitHub/LinkedIn handle for a background that simply
-// didn't include contact info — the failure mode this is meant to close off.
+// on the output against the background). Added after this exact model invented a plausible phone
+// number, email, and GitHub handle for a background that simply didn't include contact info.
 const ANTI_FABRICATION =
-  "Only use facts present in the background text below — never invent, estimate, or embellish a skill, " +
-  "metric, employer, dates, or contact detail (email, phone, GitHub, LinkedIn) that isn't literally there. " +
-  "If the background is missing a fact a resume normally has (e.g. no phone number given), leave a bracketed " +
-  "placeholder like [phone] rather than making one up. Tailoring to the job means reordering and rephrasing " +
-  "what's real to foreground the relevant parts, never adding content that wasn't given to you.";
+  "Only use facts present in the background text — never invent, estimate, or embellish a skill, " +
+  "metric, employer, date, or contact detail (email, phone, GitHub, LinkedIn) that isn't literally there. " +
+  "If a normally-expected fact is missing (e.g. no phone number given), use a bracketed placeholder like " +
+  "[phone] rather than making one up. Tailoring means reordering and rephrasing what's real to foreground " +
+  "the relevant parts, never adding content you weren't given.";
 
-function extractLatex(text: string): string {
-  const fenced = text.match(/```(?:latex|tex)?\n([\s\S]*?)```/);
-  return (fenced ? fenced[1] : text).trim();
-}
-
-export async function generateResumeLatex(background: string, jobDescription?: string): Promise<string> {
-  const response = await client.messages.create({
-    model: "claude-sonnet-5",
-    max_tokens: 8000,
-    system: `You write single-page, ATS-friendly LaTeX resumes. Only use these packages: ${ALLOWED_PACKAGES} ${ANTI_FABRICATION} Output only the complete .tex document, no explanation, no markdown fences.`,
-    messages: [
-      {
-        role: "user",
-        content: `Here is an example of the house style:\n\n${RESUME_EXEMPLAR}\n\nNow write a new resume in this same style, scaffolded from this background:\n\n${background}${
-          jobDescription ? `\n\nTailor it to this job posting:\n\n${jobDescription}` : ""
-        }`,
+const RESUME_TOOL: Anthropic.Tool = {
+  name: "emit_resume",
+  description:
+    "Return the tailored resume as structured content. Layout, fonts and spacing are handled downstream — supply text only, no LaTeX or markdown.",
+  input_schema: {
+    type: "object",
+    properties: {
+      name: { type: "string" },
+      contact: {
+        type: "array",
+        items: { type: "string" },
+        description: "Email, phone, and profile links / city as separate strings. Only what the background contains.",
       },
-    ],
-  });
+      summary: {
+        type: "string",
+        description: "Optional single sentence positioning the candidate for this job. Omit entirely if the background doesn't support one.",
+      },
+      skills: { type: "array", items: { type: "string" } },
+      experience: {
+        type: "array",
+        description: "At most the 4 most job-relevant roles, most recent / strongest first.",
+        items: {
+          type: "object",
+          properties: {
+            title: { type: "string" },
+            organization: { type: "string" },
+            location: { type: "string" },
+            dates: { type: "string", description: 'e.g. "Jun 2024 – Aug 2024" or "2022 – Present"' },
+            bullets: {
+              type: "array",
+              items: { type: "string" },
+              description:
+                "1–3 bullets, MOST IMPRESSIVE FIRST, each a single line of ~20 words. Older or less relevant roles get 1. Trailing bullets may be dropped to fit one page.",
+            },
+          },
+          required: ["title", "organization", "dates", "bullets"],
+        },
+      },
+      projects: {
+        type: "array",
+        description: "Optional. Only if the background describes projects and there's room after experience.",
+        items: {
+          type: "object",
+          properties: {
+            title: { type: "string" },
+            organization: { type: "string", description: 'Leave empty ("") for personal projects.' },
+            dates: { type: "string" },
+            bullets: { type: "array", items: { type: "string" } },
+          },
+          required: ["title", "dates", "bullets"],
+        },
+      },
+      education: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            degree: { type: "string" },
+            school: { type: "string" },
+            dates: { type: "string" },
+            details: { type: "string", description: "Optional: GPA, honors, relevant coursework." },
+          },
+          required: ["degree", "school", "dates"],
+        },
+      },
+    },
+    required: ["name", "contact", "skills", "experience", "education"],
+  },
+};
 
-  const block = response.content.find((b) => b.type === "text");
-  if (!block || block.type !== "text") throw new Error("no text in resume generation response");
-  return extractLatex(block.text);
+const COVER_TOOL: Anthropic.Tool = {
+  name: "emit_cover_letter",
+  description: "Return the cover letter as structured content. Supply text only, no LaTeX or markdown.",
+  input_schema: {
+    type: "object",
+    properties: {
+      sender: { type: "string", description: "The candidate's name." },
+      senderContact: { type: "array", items: { type: "string" }, description: "Email / phone, only what the background contains." },
+      recipient: { type: "string", description: 'e.g. "Hiring Team, Acme Corp"' },
+      greeting: { type: "string", description: 'e.g. "Dear Hiring Team,"' },
+      paragraphs: {
+        type: "array",
+        items: { type: "string" },
+        description: "2–3 short body paragraphs, strongest point first. The last may be dropped to fit one page.",
+      },
+      closing: { type: "string", description: 'e.g. "Sincerely,"' },
+    },
+    required: ["sender", "senderContact", "recipient", "greeting", "paragraphs", "closing"],
+  },
+};
+
+const RESUME_SYSTEM =
+  "You turn a candidate's background into a tailored, strictly single-page resume. Hard limits: at most 4 " +
+  "roles; 1–3 bullets per role, fewer for older/less-relevant ones; each bullet one line (~20 words) with the " +
+  "strongest first. Favor depth on recent, job-relevant work over listing everything. " +
+  ANTI_FABRICATION;
+
+const COVER_SYSTEM =
+  "You write a concise, specific, single-page cover letter: 2–3 short paragraphs that connect this " +
+  "candidate's real experience to this specific job. No filler, no restating the whole resume. " +
+  ANTI_FABRICATION;
+
+async function callTool<T>(system: string, prompt: string, tool: Anthropic.Tool): Promise<T> {
+  const res = await client.messages.create({
+    model: "claude-sonnet-5",
+    max_tokens: 4000,
+    system,
+    tools: [tool],
+    tool_choice: { type: "tool", name: tool.name },
+    messages: [{ role: "user", content: prompt }],
+  });
+  const block = res.content.find((b) => b.type === "tool_use");
+  if (!block || block.type !== "tool_use") throw new Error(`${tool.name}: model returned no structured output`);
+  return block.input as T;
 }
 
-export async function generateCoverLetterLatex(
+export type BuildResult = { latex: string; pdf: Buffer; warnings: string[]; atsNotes: AtsNotes };
+
+// Render → compile → check (which also reports page count) → trim one line → repeat, until it
+// fits one page or there's nothing left to cut. Returns the final compile + ATS result plus
+// warnings noting anything trimmed. checkAts is reused for the count rather than a parallel
+// pdfjs entry point — it already carries the Vercel-runtime worker/polyfill setup.
+async function fitToOnePage(
+  render: () => string,
+  trim: () => string | null,
+  kind: "resume" | "cover_letter",
+): Promise<BuildResult> {
+  const MAX_TRIMS = 15;
+  const cut: string[] = [];
+  let compiled = await compileLatex(render());
+  let ats = await checkAts(compiled.pdf, kind);
+  while ((ats.pageCount ?? 1) > 1 && cut.length < MAX_TRIMS) {
+    const removed = trim();
+    if (removed == null) break;
+    cut.push(removed);
+    compiled = await compileLatex(render());
+    ats = await checkAts(compiled.pdf, kind);
+  }
+  const warnings = [...compiled.warnings];
+  if (cut.length) warnings.push(`Trimmed ${cut.length} line(s) to fit one page: ${cut.map((c) => `“${c}”`).join("; ")}`);
+  if ((ats.pageCount ?? 1) > 1)
+    warnings.push(`Still ${ats.pageCount} pages after trimming — shorten your background or edit the source directly.`);
+  return { latex: compiled.source, pdf: compiled.pdf, warnings, atsNotes: ats };
+}
+
+export async function buildResume(background: string, jobDescription?: string): Promise<BuildResult> {
+  const data = await callTool<ResumeData>(
+    RESUME_SYSTEM,
+    `Background:\n\n${background}${jobDescription ? `\n\nTailor to this job: ${jobDescription}` : ""}`,
+    RESUME_TOOL,
+  );
+  if (!data?.name || !Array.isArray(data.experience)) throw new Error("emit_resume: malformed resume data");
+  return fitToOnePage(
+    () => renderResume(data),
+    () => trimResume(data),
+    "resume",
+  );
+}
+
+export async function buildCoverLetter(
   background: string,
   job: { title: string; company: string; description?: string },
-): Promise<string> {
-  const response = await client.messages.create({
-    model: "claude-sonnet-5",
-    max_tokens: 8000,
-    system: `You write concise, specific LaTeX cover letters. Only use these packages: ${ALLOWED_PACKAGES} ${ANTI_FABRICATION} Output only the complete .tex document, no explanation, no markdown fences.`,
-    messages: [
-      {
-        role: "user",
-        content: `Here is an example of the house style:\n\n${COVER_LETTER_EXEMPLAR}\n\nNow write a new cover letter in this same style, scaffolded from this background:\n\n${background}\n\nFor this job: ${job.title} at ${job.company}${
-          job.description ? `\n\n${job.description}` : ""
-        }`,
-      },
-    ],
-  });
-
-  const block = response.content.find((b) => b.type === "text");
-  if (!block || block.type !== "text") throw new Error("no text in cover letter generation response");
-  return extractLatex(block.text);
+): Promise<BuildResult> {
+  const data = await callTool<CoverLetterData>(
+    COVER_SYSTEM,
+    `Background:\n\n${background}\n\nJob: ${job.title} at ${job.company}${job.description ? `\n\n${job.description}` : ""}`,
+    COVER_TOOL,
+  );
+  if (!data?.sender || !Array.isArray(data.paragraphs)) throw new Error("emit_cover_letter: malformed cover letter data");
+  return fitToOnePage(
+    () => renderCoverLetter(data),
+    () => trimCoverLetter(data),
+    "cover_letter",
+  );
 }
