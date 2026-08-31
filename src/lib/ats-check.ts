@@ -10,6 +10,7 @@ export type AtsNotes = {
   ok: boolean;
   missingSections: string[];
   extractedPreview: string;
+  pageCount?: number; // optional: absent on rows written before the one-page fitter shipped
 };
 
 const EXPECTED_MARKERS: Record<"resume" | "cover_letter", { label: string; pattern: RegExp }[]> = {
@@ -41,7 +42,7 @@ export async function checkAts(pdf: Buffer, kind: "resume" | "cover_letter" = "r
 
     const { PDFParse } = await import("pdf-parse");
     const parser = new PDFParse({ data: pdf });
-    const { text } = await parser.getText();
+    const { text, total } = await parser.getText();
     await parser.destroy();
 
     const missingSections = EXPECTED_MARKERS[kind].filter((m) => !m.pattern.test(text)).map((m) => m.label);
@@ -51,12 +52,14 @@ export async function checkAts(pdf: Buffer, kind: "resume" | "cover_letter" = "r
       ok: missingSections.length === 0 && !tooShort,
       missingSections: tooShort ? ["extracted text is unexpectedly short — PDF may not be ATS-parseable", ...missingSections] : missingSections,
       extractedPreview: text.trim().slice(0, 500),
+      pageCount: total > 0 ? total : 1,
     };
   } catch (err) {
     return {
       ok: false,
       missingSections: [`ATS check itself failed to run: ${err instanceof Error ? err.message : String(err)}`],
       extractedPreview: "",
+      pageCount: 1,
     };
   }
 }

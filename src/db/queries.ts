@@ -1,11 +1,38 @@
-import { eq, and, or, desc, sql, avg, count, inArray, gte, isNotNull } from "drizzle-orm";
+import { eq, and, or, desc, sql, avg, count, inArray, notInArray, gte, lt, isNotNull } from "drizzle-orm";
 import { db } from "./client";
 import { jobs, trackedJobs, profiles, jobMatches, applicationEvents, documents } from "./schema";
 import type { DashboardFilters } from "@/lib/dashboard-filters";
-import { BOARD_RETENTION_DAYS } from "@/lib/board-retention";
+import {
+  DEFAULT_RETENTION_DAYS,
+  EXTENDED_RETENTION_DAYS,
+  EXTENDED_RETENTION_COMPANIES,
+} from "@/lib/company-tier";
 
 // Every function below takes userId first and filters on it — jobs is the one shared,
 // non-user-scoped table (the board), touched only by upsertJobs from the ingest script.
+
+const daysAgo = (d: number) => new Date(Date.now() - d * 24 * 60 * 60 * 1000);
+const companyLower = sql`lower(${jobs.company})`;
+
+// A job is "live" on the board while it's inside its retention window: EXTENDED_RETENTION_DAYS
+// for the exclusivity-clause companies (see company-tier.ts), DEFAULT_RETENTION_DAYS for
+// everyone else. Shared by getRankedBoard (what a user sees) and scripts/ingest.ts (what gets
+// pruned) so the two windows can't drift.
+export function withinRetentionWindow() {
+  return or(
+    and(inArray(companyLower, EXTENDED_RETENTION_COMPANIES), gte(jobs.postedAt, daysAgo(EXTENDED_RETENTION_DAYS))),
+    and(notInArray(companyLower, EXTENDED_RETENTION_COMPANIES), gte(jobs.postedAt, daysAgo(DEFAULT_RETENTION_DAYS))),
+  );
+}
+
+// Inverse, for pruning — written out rather than not(withinRetentionWindow()) so a NULL
+// postedAt (a few legacy rows) matches neither branch and is never pruned, same as before.
+export function pastRetentionWindow() {
+  return or(
+    and(inArray(companyLower, EXTENDED_RETENTION_COMPANIES), lt(jobs.postedAt, daysAgo(EXTENDED_RETENTION_DAYS))),
+    and(notInArray(companyLower, EXTENDED_RETENTION_COMPANIES), lt(jobs.postedAt, daysAgo(DEFAULT_RETENTION_DAYS))),
+  );
+}
 
 // New jobs sorted strictly by posting date first (day granularity — see the date_trunc below),
 // keyword-match compatibility score (jobMatches, populated by scripts/ingest.ts) breaking ties
@@ -17,25 +44,23 @@ import { BOARD_RETENTION_DAYS } from "@/lib/board-retention";
 // because we'd only ingested it that day.
 //
 // A job tracked by ANY user is exempt from ingest's prune step (see scripts/ingest.ts), so the
-// jobs table alone can hold postings well past the retention window. Without the age/tracked
+// jobs table alone can hold postings well past the retention window. Without the window/tracked
 // filter below, every other user would keep seeing that job as "new" indefinitely — it should
 // only still be visible to the user who actually tracked it.
 export async function getRankedBoard(userId: string) {
-  const cutoff = new Date(Date.now() - BOARD_RETENTION_DAYS * 24 * 60 * 60 * 1000);
   const rows = await db
     .select({ job: jobs, status: trackedJobs.status, score: jobMatches.score, rationale: jobMatches.rationale })
     .from(jobs)
     .leftJoin(trackedJobs, and(eq(trackedJobs.jobId, jobs.id), eq(trackedJobs.userId, userId)))
     .leftJoin(jobMatches, and(eq(jobMatches.jobId, jobs.id), eq(jobMatches.userId, userId)))
-    .where(or(gte(jobs.postedAt, cutoff), isNotNull(trackedJobs.status)))
+    .where(or(withinRetentionWindow(), isNotNull(trackedJobs.status)))
     .orderBy(sql`date_trunc('day', ${jobs.postedAt}) DESC NULLS LAST`, sql`${jobMatches.score} DESC NULLS LAST`);
 
   return rows.map((r) => ({ ...r.job, status: r.status, score: r.score, rationale: r.rationale }));
 }
 
-// Everything still within the board's retention window (see BOARD_RETENTION_DAYS) — used by
-// the profile page to force-rescore against whatever's currently live when the background
-// changes, without waiting for the next ingest run.
+// Everything ingested since `cutoff` — used by the profile page to force-rescore against
+// whatever's currently live when the background changes, without waiting for the next ingest run.
 export async function getJobsSince(cutoff: Date) {
   return db.select().from(jobs).where(gte(jobs.createdAt, cutoff));
 }
