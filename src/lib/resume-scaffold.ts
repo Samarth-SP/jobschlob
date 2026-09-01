@@ -22,10 +22,27 @@ const ANTI_FABRICATION =
   "[phone] rather than making one up. Tailoring means reordering and rephrasing what's real to foreground " +
   "the relevant parts, never adding content you weren't given.";
 
+const ENTRY_ITEM = {
+  type: "object" as const,
+  properties: {
+    organization: { type: "string" },
+    location: { type: "string", description: 'City, ST — or "Remote". Empty string if genuinely unknown.' },
+    role: { type: "string", description: "Job title (for experience) or the degree line, e.g. \"B.S. in Computer Science\" (for education)." },
+    dates: { type: "string", description: 'e.g. "Jun. 2024 – Aug. 2024" or "Feb. 2025 – Present"' },
+    bullets: {
+      type: "array",
+      items: { type: "string" },
+      description:
+        "MOST IMPRESSIVE FIRST. Experience: 1–3 bullets, ~1 line each (~25 words), fewer for older/less-relevant roles. Education: usually one line covering GPA / honors / relevant coursework. Trailing bullets may be dropped to fit one page.",
+    },
+  },
+  required: ["organization", "location", "role", "dates", "bullets"],
+};
+
 const RESUME_TOOL: Anthropic.Tool = {
   name: "emit_resume",
   description:
-    "Return the tailored resume as structured content. Layout, fonts and spacing are handled downstream — supply text only, no LaTeX or markdown.",
+    "Return the tailored resume as structured content. Layout, fonts and spacing are handled downstream — supply plain text only, no LaTeX or markdown. Sections render in the order education, experience, projects, skills.",
   input_schema: {
     type: "object",
     properties: {
@@ -33,62 +50,42 @@ const RESUME_TOOL: Anthropic.Tool = {
       contact: {
         type: "array",
         items: { type: "string" },
-        description: "Email, phone, and profile links / city as separate strings. Only what the background contains.",
+        description:
+          'Separate strings, rendered " | " separated: phone, email, then profile links like "linkedin.com/in/x" and "github.com/x". Only what the background literally contains.',
       },
-      summary: {
-        type: "string",
-        description: "Optional single sentence positioning the candidate for this job. Omit entirely if the background doesn't support one.",
-      },
-      skills: { type: "array", items: { type: "string" } },
+      education: { type: "array", items: ENTRY_ITEM, description: "Usually one entry." },
       experience: {
         type: "array",
-        description: "At most the 4 most job-relevant roles, most recent / strongest first.",
-        items: {
-          type: "object",
-          properties: {
-            title: { type: "string" },
-            organization: { type: "string" },
-            location: { type: "string" },
-            dates: { type: "string", description: 'e.g. "Jun 2024 – Aug 2024" or "2022 – Present"' },
-            bullets: {
-              type: "array",
-              items: { type: "string" },
-              description:
-                "1–3 bullets, MOST IMPRESSIVE FIRST, each a single line of ~20 words. Older or less relevant roles get 1. Trailing bullets may be dropped to fit one page.",
-            },
-          },
-          required: ["title", "organization", "dates", "bullets"],
-        },
+        items: ENTRY_ITEM,
+        description: "At most the 4–5 most job-relevant roles, most recent / strongest first.",
       },
       projects: {
         type: "array",
-        description: "Optional. Only if the background describes projects and there's room after experience.",
+        description: "Optional — only if the background describes projects and there's room after experience.",
         items: {
           type: "object",
           properties: {
-            title: { type: "string" },
-            organization: { type: "string", description: 'Leave empty ("") for personal projects.' },
+            name: { type: "string" },
             dates: { type: "string" },
-            bullets: { type: "array", items: { type: "string" } },
+            bullets: { type: "array", items: { type: "string" }, description: "1–3 bullets, strongest first." },
           },
-          required: ["title", "dates", "bullets"],
+          required: ["name", "dates", "bullets"],
         },
       },
-      education: {
+      skills: {
         type: "array",
+        description: 'Grouped by category — e.g. {"category": "Languages", "items": ["Python", "C++"]}. 4–8 groups.',
         items: {
           type: "object",
           properties: {
-            degree: { type: "string" },
-            school: { type: "string" },
-            dates: { type: "string" },
-            details: { type: "string", description: "Optional: GPA, honors, relevant coursework." },
+            category: { type: "string" },
+            items: { type: "array", items: { type: "string" } },
           },
-          required: ["degree", "school", "dates"],
+          required: ["category", "items"],
         },
       },
     },
-    required: ["name", "contact", "skills", "experience", "education"],
+    required: ["name", "contact", "education", "experience", "skills"],
   },
 };
 
@@ -114,9 +111,11 @@ const COVER_TOOL: Anthropic.Tool = {
 };
 
 const RESUME_SYSTEM =
-  "You turn a candidate's background into a tailored, strictly single-page resume. Hard limits: at most 4 " +
-  "roles; 1–3 bullets per role, fewer for older/less-relevant ones; each bullet one line (~20 words) with the " +
-  "strongest first. Favor depth on recent, job-relevant work over listing everything. " +
+  "You turn a candidate's background into a tailored, strictly single-page resume in a fixed template " +
+  "(sections: education, experience, projects, skills — projects optional). Hard limits: at most 4–5 roles; " +
+  "1–3 bullets per role, fewer for older/less-relevant ones; each bullet ONE line (~25 words) starting with a " +
+  "strong past-tense verb, strongest bullet first so trimming from the end degrades gracefully. Favor depth on " +
+  "recent, job-relevant work over listing everything. Skills grouped into 4–8 labelled categories. " +
   ANTI_FABRICATION;
 
 const COVER_SYSTEM =
