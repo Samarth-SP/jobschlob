@@ -3,48 +3,47 @@
 # jobschlob
 
 Job dashboard for 2 users: a keyword-scored compatibility feed, per-user application tracking with
-full status history, an analytics page, and a resume/cover-letter workshop that scaffolds a
-plain-text background corpus into LaTeX, compiles it to a real PDF, and self-checks ATS
-parseability. One repo: frontend, API, schema, and ingest script share types and one Drizzle
-schema.
+full status history, an analytics page, and a resume/cover-letter workshop that turns a plain-text
+background corpus into structured content (one LLM call), fills a fixed LaTeX template, compiles it
+to a real PDF, trims it to one page, and self-checks ATS parseability. One repo: frontend, API,
+schema, and ingest script share types and one Drizzle schema.
 
 ## Status / pick up here next session
 
 **Open issue:** the ASCII scene art on the landing page (`src/components/SceneArt.tsx`,
-`src/lib/scene-ascii.ts`) still looks wrong (slanted/"italicized", low detail). Two conversion
-attempts this session (pixel-thresholding via Jimp with a corrected block-aspect-ratio, then a
-hand-drawn vector version built from explicit line-coordinate primitives to sidestep aliasing
-entirely) both got reverted at the user's request — **the file is back to the original
-pixel-sampled version** (160 cols, `charAspect = 0.5`, `threshold = 200`) so the user can
-troubleshoot it offline. The reference PNG is still sitting untracked at the project root
-(`ChatGPT Image Jul 29, 2026 at 10_36_33 PM.png` — gitignored, reference file not a build asset).
-Don't re-attempt this without the user asking.
+`src/lib/scene-ascii.ts`) still looks wrong (slanted/"italicized", low detail). Prior conversion
+attempts were all reverted at the user's request — the file is the original pixel-sampled version
+(160 cols, `charAspect = 0.5`, `threshold = 200`). Reference PNG sits untracked at the project root
+(gitignored). Don't re-attempt without the user asking.
 
-**Not yet visually verified by Claude** (no browser tool available, declined this session): the
-theme switcher across all 6 presets, the workshop's PDF preview/ATS banner, the analytics Sankey
-chart's layout/legibility, the nav logo fade-in timing, and — new this session — the dashboard's
-multi-select location/category/level filter UI (`NewJobsSection.tsx`). Everything was checked via
-`curl`, direct function calls against the real DB, `npm run build`, and `tsc --noEmit` only. Worth
-a real click-through pass, especially the new filters.
+**Not yet visually verified by Claude** (no browser tool): theme switcher across the 6 presets,
+the analytics Sankey chart, the nav logo fade-in. The workshop resume/cover-letter output *was*
+rendered and eyeballed (Tectonic locally → PNG) and matches the house template.
 
-**This session's other major change:** the ingestion pipeline went from one hardcoded Greenhouse
-company (`asana`) to multiple sources with entry-level filtering, and job-compatibility scoring
-was switched from an LLM call to local keyword matching — see Ingest and Scoring below, both
-rewritten. A near-miss during cleanup is worth remembering: a `where(isNull(...) && notInArray(...))`
-call used JS `&&` instead of Drizzle's `and()`, which silently drops all but the last condition —
-it deleted 4,358 job rows (everything except the 3 tracked ones) before being caught and fully
-recovered (job IDs are deterministic hashes, so re-running ingest regenerated everything
-byte-identical). **Always use Drizzle's `and()`/`or()` to combine query conditions, never JS
-`&&`/`||`.**
+**Recent sessions' major changes (all shipped):**
+- Ingest widened from Greenhouse-only to Greenhouse + Lever + Ashby + SimplifyJobs, with a
+  `robotics` category and mostly-robotics direct boards. `classifyLevel` gained a **lenient mode**
+  for robotics boards (pass unless visibly senior). Job-match scoring is local keyword matching,
+  not an LLM. See Ingest / Scoring.
+- **Per-company retention** (`src/lib/company-tier.ts`): big-tech/AI + mid-to-large robotics/AV
+  companies keep listings 30 days; everyone else 7. `withinRetentionWindow()` /
+  `pastRetentionWindow()` in queries.ts are shared by `getRankedBoard` and the ingest prune.
+- **Workshop rewrite:** the LLM no longer writes LaTeX — it returns structured content via an
+  Anthropic tool schema, which fills a fixed template (Jake Gutierrez's resume template) that a
+  compile→count-pages→trim loop forces to one page. See LaTeX / PDF pipeline.
+
+**Hard-won lesson, still true:** always combine Drizzle query conditions with `and()`/`or()`,
+never JS `&&`/`||` — JS `&&` silently keeps only the last operand. A `where(isNull(...) &&
+notInArray(...))` once deleted 4,358 job rows (recovered — job IDs are deterministic hashes).
 
 ## Schema (`src/db/schema.ts`)
 
 - `jobs` — the shared board. Not user-scoped. `id` is a dedupe hash (`lib/dedupe.ts`) of
   source+external-id, so re-ingesting the same posting updates it instead of duplicating it.
-  `category` (`tech | consulting | vc_pe`) and `level` (`internship | new_grad`) are set per source
-  in `scripts/ingest.ts` — see Ingest below. Both nullable: a handful of pre-existing tracked jobs
-  from before these columns existed still have `null` in both and are deliberately left alone
-  (never delete/backfill a tracked job's row out from under a user's application history).
+  `category` (`tech | consulting | vc_pe | robotics`) and `level` (`internship | new_grad`) are set
+  per source in `scripts/ingest.ts` — see Ingest below. Both nullable: a handful of pre-existing
+  tracked jobs from before these columns existed still have `null` in both and are deliberately
+  left alone (never delete/backfill a tracked job's row out from under a user's application history).
 - `trackedJobs` — per-user status (`interested | applied | heard_back | oa | interview | offer |
   rejected | ghosted | archived`) + notes on a job. `(userId, jobId)` unique. Current status only
   — `applicationEvents` is the history.
@@ -62,7 +61,8 @@ byte-identical). **Always use Drizzle's `and()`/`or()` to combine query conditio
 - `documents` — saved resume/cover-letter LaTeX source (not the PDF — PDFs are cheap to recompile
   on demand via `lib/latex.ts`, so there's no Vercel Blob dependency). `jobId` nullable: a
   document can be general-purpose or tailored to one job. `atsNotes` is
-  `{ ok, missingSections, extractedPreview }` from `lib/ats-check.ts`.
+  `{ ok, missingSections, extractedPreview, pageCount? }` from `lib/ats-check.ts` (`pageCount`
+  absent on rows written before the one-page fitter shipped).
 
 There is no `users` table and no `preferences` table (the old keyword-weight scoring system —
 `lib/score.ts` — was removed once the dashboard/profile pages shipped and nothing read it anymore).
@@ -108,15 +108,38 @@ to fetching TeX packages live, that risks flaky latency on cold containers. Both
 stale local macOS binary uploaded via `vercel --prod` will crash on Vercel's Linux build machine
 with "cannot execute binary file"; this bit us once, that's why `.vercelignore` exists).
 
-`src/lib/resume-scaffold.ts` generates resume/cover-letter LaTeX (Claude Sonnet) from the
-background corpus, few-shot against a house-style exemplar in `lib/resume-template.ts` — only
-using packages already warmed into the Tectonic cache (`scripts/fixture.tex`). `src/lib/ats-check.ts`
-re-extracts text from the compiled PDF via `pdf-parse` to catch the real gotcha (a PDF that looks
-fine but whose embedded text is garbled/missing). **`pdf-parse` needs a `DOMMatrix`/`ImageData`/
-`Path2D` polyfill stubbed in before it's imported** (it references them even for plain text
-extraction, and they don't exist in Node) — done via a dynamic `import()` inside the function,
-since a static import would be hoisted above the polyfill assignment. `/api/workshop/generate`
-orchestrates scaffold → compile → ATS check → save; session-gated like `/api/track`.
+**Workshop generation — the LLM never writes LaTeX.** `src/lib/resume-scaffold.ts`:
+
+1. One Claude Sonnet call per document with a forced **tool schema** (`emit_resume` /
+   `emit_cover_letter`, `tool_choice: {type: "tool"}`) — the model returns *structured content*
+   only (name, contact, experience entries, skill groups, …), never markup.
+2. `src/lib/resume-template.ts` `renderResume` / `renderCoverLetter` fill a **fixed LaTeX
+   skeleton** from that content, LaTeX-escaping every field (`& % $ # _ ~ ^ {}`) so a stray char
+   in a job title can't break the compile. `RESUME_PREAMBLE` is Jake Gutierrez's widely-used
+   resume template (MIT, based on sb2nov) reproduced verbatim except `charter`→`XCharter` and the
+   two `\input{glyphtounicode}` / `\pdfgentounicode` lines dropped (pdfTeX-only; latex.ts strips
+   them anyway, but omitting avoids a spurious warning). Every package it uses is warmed into the
+   Tectonic cache (`scripts/fixture.tex`). `ResumeData` sections render in order: education,
+   experience, projects, skills.
+3. `fitToOnePage` loops render → `compileLatex` → `checkAts` (which now also returns `pageCount`)
+   → trim one lowest-priority line → repeat, until it's one page or nothing's left to cut
+   (`trimResume` drops trailing bullets, projects before experience; education never trimmed).
+   Anything trimmed is reported in the response `warnings`, surfaced in the workshop's notice
+   banner. Cap: 15 trims.
+
+Layout drift is structurally impossible now — the model can't touch spacing, fonts, or sections.
+The one thing not locally testable is the page-count *trigger*: `checkAts`'s pdfjs worker setup
+only works in the Next/Vercel runtime, so under plain `tsx` it returns `pageCount: 1` and the loop
+no-ops (safe degradation). If you rebuild the template, paste the target `.tex` — the tool schema
+and `renderResume` are hand-matched to the current one's structure.
+
+`src/lib/ats-check.ts` re-extracts text from the compiled PDF via `pdf-parse` to catch the real
+gotcha (a PDF that looks fine but whose embedded text is garbled/missing). **`pdf-parse` needs a
+`DOMMatrix`/`ImageData`/`Path2D` polyfill stubbed in before it's imported** (it references them
+even for plain text extraction, and they don't exist in Node) — done via a dynamic `import()`
+inside the function, since a static import would be hoisted above the polyfill assignment.
+`/api/workshop/generate` calls `buildResume` / `buildCoverLetter` (which return
+`{ latex, pdf, warnings, atsNotes }`) then saves; session-gated like `/api/track`.
 
 ## Dedupe
 
@@ -206,27 +229,33 @@ Vercel env vars (production + preview); everything else (`AUTH_SECRET`, `AUTH_GI
 
 `scripts/ingest.ts` runs standalone via `tsx` (no Next.js import; local runs need env vars
 exported from `.env` manually, e.g. `set -a; source .env; set +a`), on a GitHub Actions cron
-(`.github/workflows/ingest.yml`, weekdays 13:00 UTC) and via `workflow_dispatch`. It also prunes
-`jobs` rows older than 60 days that have no `trackedJobs` referencing them, and scores new jobs
-against every profiled user (see Scoring above).
+(`.github/workflows/ingest.yml`, weekdays 13:00 UTC) and via `workflow_dispatch`. It fetches all
+sources with **`Promise.allSettled`** (one dead board can't abort the run), upserts, scores new
+jobs against every profiled user (see Scoring), then prunes — see Retention below.
 
-Two kinds of sources, both entry-level only:
+Source fetches use ATS aggregator APIs, all no-auth, all entry-level only:
 
-- **Greenhouse boards** (`GREENHOUSE_BOARDS` in ingest.ts) — `boards-api.greenhouse.io/v1/boards/
-  {slug}/jobs`, no auth. Each board lists every seniority mixed together, so every posting is run
-  through `src/lib/level-heuristic.ts` (`classifyLevel`) and dropped unless the title reads as
-  internship/new-grad (title regex, biased toward false negatives — see the file's own comment for
-  the tradeoff and upgrade path). Currently: `asana` (tech), `alixpartners` (consulting), `a16z`
-  and `generalcatalyst` (vc_pe). **Slugs were verified live one at a time against each company's
-  real careers page before adding — a board 200ing is not proof it's the right company**
-  (`boards-api.greenhouse.io/v1/boards/bcg/jobs` resolves and returns real-looking jobs, but it is
-  not Boston Consulting Group). Don't add a slug without checking it actually belongs to who you
-  think it does.
+- **Greenhouse** (`GREENHOUSE_BOARDS` + `ROBOTICS_GREENHOUSE`), **Lever** (`LEVER_BOARDS`),
+  **Ashby** (`ROBOTICS_ASHBY`) — per-company boards, `{slug, category}`. Boards mix every seniority,
+  so titles run through `src/lib/level-heuristic.ts` `classifyLevel(title, lenient)`:
+  - **strict** (default, for tech/consulting/vc_pe): a title needs a positive entry-level marker
+    (intern, junior, new grad, analyst, "Engineer I", …) to pass. Biased hard toward false
+    negatives.
+  - **lenient** (passed when `board.category === "robotics"`): anything not visibly senior passes
+    as `new_grad` — robotics startups title almost everything as a bare "\<X\> Engineer" and strict
+    mode dropped ~95% of the board. A few mid-level roles leak in; accepted tradeoff.
+  **Verify a slug belongs to who you think before adding** — a board 200ing is not proof of
+  identity (`boards-api.greenhouse.io/v1/boards/bcg/jobs` resolves but is not Boston Consulting
+  Group).
 - **SimplifyJobs feeds** (`SIMPLIFY_FEEDS`) — `raw.githubusercontent.com/SimplifyJobs/
-  {Summer2027-Internships,New-Grad-Positions}/dev/.github/scripts/listings.json`, community-
-  maintained JSON aggregating hundreds of companies' tech internship/new-grad postings, updated
-  hourly. Level is implicit in which feed a listing came from, so nothing here needs
-  `classifyLevel`. Filter to `active: true` — most entries in the raw feed are historical/closed.
+  {Summer2027-Internships,New-Grad-Positions}/dev/.github/scripts/listings.json`, community JSON
+  aggregating hundreds of companies, updated hourly. Level comes from which feed. Filter to
+  `active: true`. **`postedAt` = `max(date_posted, date_updated)`** — Simplify re-confirms
+  still-open listings by bumping `date_updated`, and keying the retention window on the frozen
+  `date_posted` alone was pruning currently-active listings.
+
+`dedupeAcrossSources` drops a SimplifyJobs row when a direct-ATS row describes the same posting
+(same normalized company/title/location) — the direct source is fresher.
 
 Sources considered and deliberately skipped for now (see conversation history if picking this back
 up): `jobright-ai`'s consulting-internship GitHub repos (README-table only, affiliate redirect
@@ -234,9 +263,26 @@ links instead of the original posting URL, only last 7 days shown — lower qual
 and JobSpy-style LinkedIn/Indeed keyword scraping for VC/PE roles (best coverage for that vertical,
 but real ToS/blocking risk and scraper fragility). VC/PE coverage stays thin without one of these.
 
-**Scale note:** the SimplifyJobs feeds alone are ~4,200 active entries, so `upsertJobs` batches
+**Scale note:** the SimplifyJobs feeds alone are ~5,000 active entries, so `upsertJobs` batches
 inserts (`UPSERT_BATCH_SIZE = 500` in queries.ts) — a single multi-thousand-row insert over Neon's
 HTTP driver fails outright.
+
+## Retention (the board's freshness window)
+
+`src/lib/company-tier.ts`: `DEFAULT_RETENTION_DAYS = 7`, `EXTENDED_RETENTION_DAYS = 30`. The
+`EXTENDED_RETENTION_COMPANIES` list — large big-tech/AI + mid-to-large robotics/AV companies only
+(no finance, quant, consulting, defense, semis, auto, consumer — deliberately scoped by the owner)
+— keeps those companies' listings on the board for 30 days instead of 7. Matched **exact,
+case-insensitive** against `jobs.company` (SimplifyJobs' `company_name`, or a Greenhouse/Lever/
+Ashby slug); feed name variants like `"PricewaterhouseCoopers (PwC)"` are their own literal
+entries. Direct robotics boards store the slug (`figureai`, `waabi`), so the slugs are on the list
+too.
+
+`withinRetentionWindow()` / `pastRetentionWindow()` in `queries.ts` are the single source of
+truth: `getRankedBoard` uses the former (what a user sees), `scripts/ingest.ts` the latter (what
+gets pruned), so display and prune can never drift. Both are keyed on `postedAt`, not `createdAt`
+(ingest time). A job any user tracks is exempt from pruning. (There is no `board-retention.ts` any
+more — it was folded into `company-tier.ts`.)
 
 ## Routes
 
@@ -247,7 +293,9 @@ HTTP driver fails outright.
 - `/workshop` — resume/cover-letter generation, PDF preview, ATS check.
 - `/analytics` — heatmap, Sankey status flow, avg match score.
 - API: `/api/track` (status changes), `/api/dashboard/filters` (persist filters),
-  `/api/workshop/generate` (scaffold → compile → check → save), `/api/auth/[...nextauth]`.
+  `/api/workshop/generate` (LLM structured content → fill template → compile → one-page trim loop
+  → ATS check → save), `/api/workshop/upload`, `/api/workshop/documents` (recompile/rescan/
+  activate/delete), `/api/auth/[...nextauth]`.
 
 ## Deploy
 
