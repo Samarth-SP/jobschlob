@@ -1,8 +1,10 @@
 import { eq, and, or, desc, sql, avg, count, inArray, notInArray, gte, lt, isNotNull } from "drizzle-orm";
 import { db } from "./client";
-import { jobs, trackedJobs, profiles, jobMatches, applicationEvents, documents } from "./schema";
+import { jobs, trackedJobs, profiles, jobMatches, applicationEvents, documents, applyTasks } from "./schema";
 import type { DashboardFilters } from "@/lib/dashboard-filters";
 import type { LlmConfig } from "@/lib/llm-config";
+import type { ApplyIdentity } from "@/lib/apply-identity";
+import { generateApplyToken, hashApplyToken } from "@/lib/apply-token";
 import {
   DEFAULT_RETENTION_DAYS,
   EXTENDED_RETENTION_DAYS,
@@ -296,6 +298,16 @@ export async function getAvgMatchScore(userId: string): Promise<{ overall: numbe
   };
 }
 
+// The one active resume/cover-letter for a user — see setActiveDocument for how "active" stays
+// exclusive per (userId, kind). Used to snapshot a document id when queuing an apply task.
+export async function getActiveDocument(userId: string, kind: "resume" | "cover_letter") {
+  const [doc] = await db
+    .select()
+    .from(documents)
+    .where(and(eq(documents.userId, userId), eq(documents.kind, kind), eq(documents.active, true)));
+  return doc ?? null;
+}
+
 export async function getDocuments(userId: string, jobId?: string) {
   const conditions = jobId
     ? and(eq(documents.userId, userId), eq(documents.jobId, jobId))
@@ -350,4 +362,110 @@ export async function deleteDocument(userId: string, id: number) {
     .where(and(eq(documents.id, id), eq(documents.userId, userId)))
     .returning();
   return deleted ?? null;
+}
+
+// --------------------------------------------------------------------------- //
+// Auto-apply: identity facts, worker bearer token, and the task queue.
+// --------------------------------------------------------------------------- //
+
+export async function getIdentity(userId: string): Promise<ApplyIdentity | null> {
+  const [row] = await db.select({ identity: profiles.identity }).from(profiles).where(eq(profiles.userId, userId));
+  return (row?.identity as ApplyIdentity | null) ?? null;
+}
+
+export async function setIdentity(userId: string, identity: ApplyIdentity) {
+  await db
+    .insert(profiles)
+    .values({ userId, identity })
+    .onConflictDoUpdate({ target: profiles.userId, set: { identity, updatedAt: new Date() } });
+}
+
+export async function hasApplyToken(userId: string): Promise<boolean> {
+  const [row] = await db.select({ token: profiles.applyApiToken }).from(profiles).where(eq(profiles.userId, userId));
+  return Boolean(row?.token);
+}
+
+// Returns the raw token exactly once — only its hash is ever stored (lib/apply-token.ts) — so the
+// caller (the profile page) must show it to the user immediately; it can't be retrieved again.
+export async function regenerateApplyToken(userId: string): Promise<string> {
+  const token = generateApplyToken();
+  await db
+    .insert(profiles)
+    .values({ userId, applyApiToken: hashApplyToken(token) })
+    .onConflictDoUpdate({ target: profiles.userId, set: { applyApiToken: hashApplyToken(token), updatedAt: new Date() } });
+  return token;
+}
+
+export async function clearApplyToken(userId: string) {
+  await db.update(profiles).set({ applyApiToken: null, updatedAt: new Date() }).where(eq(profiles.userId, userId));
+}
+
+// Authenticates a worker request: given the raw bearer token from the Authorization header,
+// finds which user it belongs to (or null if it doesn't match any stored hash).
+export async function getUserIdForApplyToken(rawToken: string): Promise<string | null> {
+  const [row] = await db.select({ userId: profiles.userId }).from(profiles).where(eq(profiles.applyApiToken, hashApplyToken(rawToken)));
+  return row?.userId ?? null;
+}
+
+// Queues (or re-queues) a job for the local worker to prefill. Upserts on the (userId, jobId)
+// unique index — re-queuing an already-queued/errored/needs_input job resets it to 'queued' with
+// the current active document and clears any previous run's notes/flags, rather than accumulating
+// duplicate rows for the same job.
+export async function queueApplyTask(userId: string, jobId: string, documentId: number | null) {
+  const [saved] = await db
+    .insert(applyTasks)
+    .values({ userId, jobId, documentId, status: "queued" })
+    .onConflictDoUpdate({
+      target: [applyTasks.userId, applyTasks.jobId],
+      set: { documentId, status: "queued", notes: null, fieldFlags: null, updatedAt: new Date() },
+    })
+    .returning();
+  return saved;
+}
+
+// What the local worker pulls down — see /api/apply/queue. Joins in just enough to act: the
+// job's URL and the snapshotted document's blobUrl (to download the tailored resume PDF).
+export async function getQueuedApplyTasks(userId: string) {
+  return db
+    .select({ task: applyTasks, job: jobs, document: documents })
+    .from(applyTasks)
+    .innerJoin(jobs, eq(jobs.id, applyTasks.jobId))
+    .leftJoin(documents, eq(documents.id, applyTasks.documentId))
+    .where(and(eq(applyTasks.userId, userId), eq(applyTasks.status, "queued")));
+}
+
+// All of a user's apply tasks (any status) for display in the UI, newest first.
+export async function getApplyTasks(userId: string) {
+  return db
+    .select({ task: applyTasks, job: jobs })
+    .from(applyTasks)
+    .innerJoin(jobs, eq(jobs.id, applyTasks.jobId))
+    .where(eq(applyTasks.userId, userId))
+    .orderBy(desc(applyTasks.updatedAt));
+}
+
+// Scoped to (taskId, userId) so the document-download route can only ever serve a document that
+// task's own token-holder was actually handed via /api/apply/queue.
+export async function getApplyTaskDocument(userId: string, taskId: number) {
+  const [row] = await db
+    .select({ blobUrl: documents.blobUrl, filename: documents.filename })
+    .from(applyTasks)
+    .innerJoin(documents, eq(documents.id, applyTasks.documentId))
+    .where(and(eq(applyTasks.id, taskId), eq(applyTasks.userId, userId)));
+  return row ?? null;
+}
+
+// The worker reports back by task id, scoped to the token's own user so one worker can't update
+// another user's task even if it guessed an id.
+export async function updateApplyTaskStatus(
+  userId: string,
+  taskId: number,
+  patch: { status: "filled" | "needs_input" | "error"; notes?: string; fieldFlags?: unknown },
+) {
+  const [updated] = await db
+    .update(applyTasks)
+    .set({ ...patch, updatedAt: new Date() })
+    .where(and(eq(applyTasks.id, taskId), eq(applyTasks.userId, userId)))
+    .returning();
+  return updated ?? null;
 }

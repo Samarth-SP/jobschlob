@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { StatusEditor } from "@/components/StatusEditor";
+import { ApplyQueueButton } from "@/components/ApplyQueueButton";
 import { statusClasses } from "@/lib/status-style";
 
 type HistoryEvent = { status: string; changedAt: Date | string };
@@ -21,7 +22,15 @@ function label(status: string) {
   return status.replace("_", " ");
 }
 
-export function TrackedApplications({ items }: { items: TrackedJob[] }) {
+type ApplyStatus = { status: string; notes: string | null };
+
+export function TrackedApplications({
+  items,
+  applyStatusByJob = {},
+}: {
+  items: TrackedJob[];
+  applyStatusByJob?: Record<string, ApplyStatus>;
+}) {
   const [expanded, setExpanded] = useState<string | null>(null);
 
   if (items.length === 0) return <p className="text-foreground-muted">Nothing tracked yet.</p>;
@@ -69,7 +78,10 @@ export function TrackedApplications({ items }: { items: TrackedJob[] }) {
                   >
                     View posting ↗
                   </a>
-                  <StatusEditor jobId={job.id} status={status} />
+                  <div className="flex items-center gap-3">
+                    <ApplyQueueButton jobId={job.id} initialStatus={applyStatusByJob[job.id] ?? null} />
+                    <StatusEditor jobId={job.id} status={status} />
+                  </div>
                 </div>
 
                 {notes && <p className="mb-3 text-xs text-foreground-muted">{notes}</p>}

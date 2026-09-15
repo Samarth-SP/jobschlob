@@ -1,12 +1,27 @@
 import { auth } from "@/lib/auth";
-import { getProfile, setProfile, getJobsSince, saveJobMatches, getLlmConfig, setLlmConfig } from "@/db/queries";
+import {
+  getProfile,
+  setProfile,
+  getJobsSince,
+  saveJobMatches,
+  getLlmConfig,
+  setLlmConfig,
+  getIdentity,
+  setIdentity,
+  hasApplyToken,
+  regenerateApplyToken,
+  clearApplyToken,
+} from "@/db/queries";
 import { scoreJobForUser } from "@/lib/match";
 import { EXTENDED_RETENTION_DAYS } from "@/lib/company-tier";
 import { revalidatePath } from "next/cache";
 import { ProfileForm, type SaveResult } from "@/components/ProfileForm";
 import { LlmSettingsForm, type LlmSettingsResult, type RedactedLlmConfig } from "@/components/LlmSettingsForm";
+import { IdentityForm, type IdentityResult } from "@/components/IdentityForm";
+import { ApplyTokenSection } from "@/components/ApplyTokenSection";
 import { encryptSecret } from "@/lib/crypto";
 import { LLM_PROCESSES, type LlmConfig, type LlmProcess, type Provider } from "@/lib/llm-config";
+import type { ApplyIdentity } from "@/lib/apply-identity";
 
 export default async function ProfilePage() {
   const session = await auth();
@@ -21,6 +36,8 @@ export default async function ProfilePage() {
     openaiKeySet: Boolean(llmConfig?.keys?.openai),
     routing: llmConfig?.routing ?? {},
   };
+  const identity = (await getIdentity(userId)) ?? {};
+  const applyTokenSet = await hasApplyToken(userId);
 
   async function save(_prev: SaveResult, formData: FormData): Promise<SaveResult> {
     "use server";
@@ -80,6 +97,53 @@ export default async function ProfilePage() {
     }
   }
 
+  async function saveIdentity(_prev: IdentityResult, formData: FormData): Promise<IdentityResult> {
+    "use server";
+    const str = (k: string) => String(formData.get(k) ?? "").trim();
+    const tri = (k: string): boolean | null => {
+      const v = formData.get(k);
+      return v === "yes" ? true : v === "no" ? false : null;
+    };
+    const next: ApplyIdentity = {
+      fullName: str("fullName"),
+      email: str("email"),
+      phone: str("phone"),
+      location: str("location"),
+      links: { linkedin: str("linkedin"), github: str("github"), portfolio: str("portfolio") },
+      workAuthorization: str("workAuthorization"),
+      requiresSponsorship: tri("requiresSponsorship"),
+      willingToRelocate: tri("willingToRelocate"),
+      remotePreference: str("remotePreference"),
+      desiredCompensation: str("desiredCompensation"),
+      earliestStart: str("earliestStart"),
+      noticePeriod: str("noticePeriod"),
+      pronouns: str("pronouns"),
+      eeo: {
+        gender: str("eeoGender"),
+        race: str("eeoRace"),
+        veteran: str("eeoVeteran"),
+        disability: str("eeoDisability"),
+        hispanic: str("eeoHispanic"),
+      },
+    };
+    await setIdentity(userId, next);
+    revalidatePath("/profile");
+    return { saved: true };
+  }
+
+  async function regenerateToken(): Promise<string> {
+    "use server";
+    const token = await regenerateApplyToken(userId);
+    revalidatePath("/profile");
+    return token;
+  }
+
+  async function clearToken(): Promise<void> {
+    "use server";
+    await clearApplyToken(userId);
+    revalidatePath("/profile");
+  }
+
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-4 px-6 py-8">
       <h1 className="text-xl font-semibold text-pop">Profile</h1>
@@ -90,6 +154,8 @@ export default async function ProfilePage() {
       </p>
       <ProfileForm action={save} initialBackground={background} />
       <LlmSettingsForm action={saveLlm} initial={redactedLlmConfig} />
+      <IdentityForm action={saveIdentity} initial={identity} />
+      <ApplyTokenSection hasToken={applyTokenSet} regenerate={regenerateToken} clear={clearToken} />
     </main>
   );
 }

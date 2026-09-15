@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { auth } from "@/lib/auth";
-import { getRankedBoard, getTrackedJobsWithHistory, getFilters, getProfile } from "@/db/queries";
+import { getRankedBoard, getTrackedJobsWithHistory, getFilters, getProfile, getApplyTasks } from "@/db/queries";
 import { NewJobsSection } from "@/components/NewJobsSection";
 import { ProfileCard } from "@/components/ProfileCard";
 import { StatTiles } from "@/components/StatTiles";
@@ -13,14 +13,18 @@ export default async function DashboardPage() {
   }
   const userId = session.user.email;
 
-  const [board, tracked, filters, background] = await Promise.all([
+  const [board, tracked, filters, background, applyTasks] = await Promise.all([
     getRankedBoard(userId),
     getTrackedJobsWithHistory(userId),
     getFilters(userId),
     getProfile(userId),
+    getApplyTasks(userId),
   ]);
 
   const newJobs = board.filter((job) => !job.status);
+  const applyStatusByJob = Object.fromEntries(
+    applyTasks.map(({ task, job }) => [job.id, { status: task.status, notes: task.notes }]),
+  );
   const greetingName = userId.split("@")[0];
 
   return (
@@ -54,7 +58,7 @@ export default async function DashboardPage() {
               <h2 className="text-lg font-semibold text-pop">Recent applications</h2>
               <span className="text-sm text-foreground-muted">{tracked.length} total</span>
             </div>
-            <TrackedApplications items={tracked} />
+            <TrackedApplications items={tracked} applyStatusByJob={applyStatusByJob} />
           </section>
         </div>
       </div>
