@@ -1,4 +1,3 @@
-import Anthropic from "@anthropic-ai/sdk";
 import {
   type ResumeData,
   type CoverLetterData,
@@ -12,8 +11,7 @@ import { checkAts, type AtsNotes } from "./ats-check";
 import { parseJobDescription, type ParsedJd } from "./jd-parse";
 import { scoreResume, resumeToPlainText } from "./ats-score";
 import { groundingCheckResume, groundingCheckCoverLetter } from "./grounding-check";
-
-const client = new Anthropic();
+import { callTool, type LlmTool } from "./llm-client";
 
 // Prompt-only anti-fabrication is a soft guardrail, not a guarantee (there's no mechanical check
 // on the output against the background). Added after this exact model invented a plausible phone
@@ -42,7 +40,7 @@ const ENTRY_ITEM = {
   required: ["organization", "location", "role", "dates", "bullets"],
 };
 
-const RESUME_TOOL: Anthropic.Tool = {
+const RESUME_TOOL: LlmTool = {
   name: "emit_resume",
   description:
     "Return the tailored resume as structured content. Layout, fonts and spacing are handled downstream — supply plain text only, no LaTeX or markdown. Sections render in the order education, experience, projects, skills.",
@@ -92,7 +90,7 @@ const RESUME_TOOL: Anthropic.Tool = {
   },
 };
 
-const COVER_TOOL: Anthropic.Tool = {
+const COVER_TOOL: LlmTool = {
   name: "emit_cover_letter",
   description: "Return the cover letter as structured content. Supply text only, no LaTeX or markdown.",
   input_schema: {
@@ -126,20 +124,6 @@ const COVER_SYSTEM =
   "candidate's real experience to this specific job. No filler, no restating the whole resume. " +
   ANTI_FABRICATION;
 
-async function callTool<T>(system: string, prompt: string, tool: Anthropic.Tool): Promise<T> {
-  const res = await client.messages.create({
-    model: "claude-sonnet-5",
-    max_tokens: 4000,
-    system,
-    tools: [tool],
-    tool_choice: { type: "tool", name: tool.name },
-    messages: [{ role: "user", content: prompt }],
-  });
-  const block = res.content.find((b) => b.type === "tool_use");
-  if (!block || block.type !== "tool_use") throw new Error(`${tool.name}: model returned no structured output`);
-  return block.input as T;
-}
-
 export type BuildResult = { latex: string; pdf: Buffer; warnings: string[]; atsNotes: AtsNotes };
 
 // Render → compile → check (which also reports page count) → trim one line → repeat, until it
@@ -172,20 +156,23 @@ async function fitToOnePage(
 // JD parsing is advisory (feeds the keyword-score/grounding-echo checks below, not the
 // generation itself) — a parse failure shouldn't take down the whole generate request, so this
 // degrades to "no structured JD" rather than throwing.
-async function tryParseJd(job?: { title: string; company: string; description?: string }): Promise<ParsedJd | null> {
+async function tryParseJd(userId: string, job?: { title: string; company: string; description?: string }): Promise<ParsedJd | null> {
   if (!job?.description) return null;
   try {
-    return await parseJobDescription(job.description, job.title, job.company);
+    return await parseJobDescription(userId, job.description, job.title, job.company);
   } catch {
     return null;
   }
 }
 
 export async function buildResume(
+  userId: string,
   background: string,
   job?: { title: string; company: string; description?: string },
 ): Promise<BuildResult> {
   const data = await callTool<ResumeData>(
+    userId,
+    "resume",
     RESUME_SYSTEM,
     `Background:\n\n${background}${job ? `\n\nTailor to this job: ${job.title} at ${job.company}${job.description ? `\n\n${job.description}` : ""}` : ""}`,
     RESUME_TOOL,
@@ -201,7 +188,7 @@ export async function buildResume(
   // Scored/checked against the FINAL (post-trim) content, using the same `data` object the
   // fitter mutated in place — a score computed before trimming could describe bullets that no
   // longer exist in the document that got saved.
-  const jd = await tryParseJd(job);
+  const jd = await tryParseJd(userId, job);
   const keywordScore = jd ? scoreResume(data, resumeToPlainText(data), jd) : undefined;
   const grounding = groundingCheckResume(data, background, jd);
 
@@ -209,10 +196,13 @@ export async function buildResume(
 }
 
 export async function buildCoverLetter(
+  userId: string,
   background: string,
   job: { title: string; company: string; description?: string },
 ): Promise<BuildResult> {
   const data = await callTool<CoverLetterData>(
+    userId,
+    "coverLetter",
     COVER_SYSTEM,
     `Background:\n\n${background}\n\nJob: ${job.title} at ${job.company}${job.description ? `\n\n${job.description}` : ""}`,
     COVER_TOOL,
@@ -227,7 +217,7 @@ export async function buildCoverLetter(
 
   // No keyword score for cover letters (BoofSimplify's ats.py scoring is resume-specific too) —
   // just the grounding check, which also screens for JD terms echoed back as the candidate's own.
-  const jd = await tryParseJd(job);
+  const jd = await tryParseJd(userId, job);
   const grounding = groundingCheckCoverLetter(data, background, jd);
 
   return { ...built, atsNotes: { ...built.atsNotes, grounding } };

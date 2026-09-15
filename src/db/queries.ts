@@ -2,6 +2,7 @@ import { eq, and, or, desc, sql, avg, count, inArray, notInArray, gte, lt, isNot
 import { db } from "./client";
 import { jobs, trackedJobs, profiles, jobMatches, applicationEvents, documents } from "./schema";
 import type { DashboardFilters } from "@/lib/dashboard-filters";
+import type { LlmConfig } from "@/lib/llm-config";
 import {
   DEFAULT_RETENTION_DAYS,
   EXTENDED_RETENTION_DAYS,
@@ -184,6 +185,21 @@ export async function setFilters(userId: string, filters: DashboardFilters) {
     .insert(profiles)
     .values({ userId, filters })
     .onConflictDoUpdate({ target: profiles.userId, set: { filters } });
+}
+
+// null means the user hasn't configured anything — every stored key is encrypted (lib/crypto.ts);
+// this returns it as-is (still encrypted), decryption happens only in lib/llm-client.ts at the
+// point of use, never here.
+export async function getLlmConfig(userId: string): Promise<LlmConfig | null> {
+  const [row] = await db.select({ llmConfig: profiles.llmConfig }).from(profiles).where(eq(profiles.userId, userId));
+  return (row?.llmConfig as LlmConfig | null) ?? null;
+}
+
+export async function setLlmConfig(userId: string, llmConfig: LlmConfig) {
+  await db
+    .insert(profiles)
+    .values({ userId, llmConfig })
+    .onConflictDoUpdate({ target: profiles.userId, set: { llmConfig, updatedAt: new Date() } });
 }
 
 // Ingest-only — populates jobMatches for a batch of newly-seen jobs against one user.

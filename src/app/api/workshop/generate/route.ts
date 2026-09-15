@@ -41,8 +41,8 @@ export async function POST(req: Request) {
   try {
     ({ latex, pdf, warnings, atsNotes } =
       kind === "cover_letter"
-        ? await buildCoverLetter(background, jobInfo ?? { title: "the role", company: "the company" })
-        : await buildResume(background, jobInfo));
+        ? await buildCoverLetter(userId, background, jobInfo ?? { title: "the role", company: "the company" })
+        : await buildResume(userId, background, jobInfo));
   } catch (err) {
     if (err instanceof LatexCompileError) return NextResponse.json({ error: `Generation produced invalid LaTeX: ${err.message}` }, { status: 502 });
     throw err;

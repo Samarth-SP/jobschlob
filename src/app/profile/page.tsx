@@ -1,9 +1,12 @@
 import { auth } from "@/lib/auth";
-import { getProfile, setProfile, getJobsSince, saveJobMatches } from "@/db/queries";
+import { getProfile, setProfile, getJobsSince, saveJobMatches, getLlmConfig, setLlmConfig } from "@/db/queries";
 import { scoreJobForUser } from "@/lib/match";
 import { EXTENDED_RETENTION_DAYS } from "@/lib/company-tier";
 import { revalidatePath } from "next/cache";
 import { ProfileForm, type SaveResult } from "@/components/ProfileForm";
+import { LlmSettingsForm, type LlmSettingsResult, type RedactedLlmConfig } from "@/components/LlmSettingsForm";
+import { encryptSecret } from "@/lib/crypto";
+import { LLM_PROCESSES, type LlmConfig, type LlmProcess, type Provider } from "@/lib/llm-config";
 
 export default async function ProfilePage() {
   const session = await auth();
@@ -12,6 +15,12 @@ export default async function ProfilePage() {
   }
   const userId = session.user.email;
   const background = await getProfile(userId);
+  const llmConfig = await getLlmConfig(userId);
+  const redactedLlmConfig: RedactedLlmConfig = {
+    anthropicKeySet: Boolean(llmConfig?.keys?.anthropic),
+    openaiKeySet: Boolean(llmConfig?.keys?.openai),
+    routing: llmConfig?.routing ?? {},
+  };
 
   async function save(_prev: SaveResult, formData: FormData): Promise<SaveResult> {
     "use server";
@@ -38,6 +47,39 @@ export default async function ProfilePage() {
     return { rescored: matches.length };
   }
 
+  async function saveLlm(_prev: LlmSettingsResult, formData: FormData): Promise<LlmSettingsResult> {
+    "use server";
+    try {
+      // Merge onto whatever's already stored — a blank key field means "keep it", not "clear
+      // it" (only the explicit "remove" checkbox clears one), so re-reading here avoids a save
+      // of the routing fields alone wiping out a previously-stored key.
+      const current = (await getLlmConfig(userId)) ?? {};
+      const keys = { ...current.keys };
+
+      const anthropicKey = String(formData.get("anthropicKey") ?? "").trim();
+      if (formData.get("clearAnthropicKey")) delete keys.anthropic;
+      else if (anthropicKey) keys.anthropic = encryptSecret(anthropicKey);
+
+      const openaiKey = String(formData.get("openaiKey") ?? "").trim();
+      if (formData.get("clearOpenaiKey")) delete keys.openai;
+      else if (openaiKey) keys.openai = encryptSecret(openaiKey);
+
+      const routing: LlmConfig["routing"] = {};
+      for (const proc of LLM_PROCESSES) {
+        const provider = String(formData.get(`${proc}Provider`) ?? "") as Provider | "";
+        if (provider !== "anthropic" && provider !== "openai") continue; // "" = app default, no entry
+        const model = String(formData.get(`${proc}Model`) ?? "").trim();
+        routing[proc as LlmProcess] = model ? { provider, model } : { provider };
+      }
+
+      await setLlmConfig(userId, { keys, routing });
+      revalidatePath("/profile");
+      return { saved: true };
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : "Failed to save" };
+    }
+  }
+
   return (
     <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-4 px-6 py-8">
       <h1 className="text-xl font-semibold text-pop">Profile</h1>
@@ -47,6 +89,7 @@ export default async function ProfilePage() {
         resumes and cover letters.
       </p>
       <ProfileForm action={save} initialBackground={background} />
+      <LlmSettingsForm action={saveLlm} initial={redactedLlmConfig} />
     </main>
   );
 }

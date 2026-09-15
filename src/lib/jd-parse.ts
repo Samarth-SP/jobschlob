@@ -5,9 +5,7 @@
 // resume-scaffold.ts) — this is a per-generation, user-triggered call, not a per-ingest one, so
 // it doesn't reintroduce the sequential-LLM-call cost problem lib/match.ts's job board scoring
 // deliberately moved away from.
-import Anthropic from "@anthropic-ai/sdk";
-
-const client = new Anthropic();
+import { callTool, type LlmTool } from "./llm-client";
 
 export type ParsedJd = {
   title: string;
@@ -18,7 +16,7 @@ export type ParsedJd = {
   hardKeywords: string[];
 };
 
-const JD_TOOL: Anthropic.Tool = {
+const JD_TOOL: LlmTool = {
   name: "emit_jd_requirements",
   description:
     "Extract structured requirements from a job posting, for literal ATS-style keyword matching against a resume. Never invent a requirement that isn't stated.",
@@ -47,18 +45,15 @@ function asStringArray(v: unknown): string[] {
   return Array.isArray(v) ? v.map(String) : [];
 }
 
-export async function parseJobDescription(description: string, title: string, company: string): Promise<ParsedJd> {
-  const res = await client.messages.create({
-    model: "claude-sonnet-5",
-    max_tokens: 2000,
-    system: SYSTEM,
-    tools: [JD_TOOL],
-    tool_choice: { type: "tool", name: JD_TOOL.name },
-    messages: [{ role: "user", content: `Job: ${title} at ${company}\n\n${description.slice(0, 16000)}` }],
-  });
-  const block = res.content.find((b) => b.type === "tool_use");
-  if (!block || block.type !== "tool_use") throw new Error("emit_jd_requirements: model returned no structured output");
-  const data = block.input as Record<string, unknown>;
+export async function parseJobDescription(userId: string, description: string, title: string, company: string): Promise<ParsedJd> {
+  const data = await callTool<Record<string, unknown>>(
+    userId,
+    "jdParse",
+    SYSTEM,
+    `Job: ${title} at ${company}\n\n${description.slice(0, 16000)}`,
+    JD_TOOL,
+    2000,
+  );
 
   return {
     title,
