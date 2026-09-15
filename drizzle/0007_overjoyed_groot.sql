@@ -1,0 +1,1 @@
+ALTER TABLE "profiles" ADD COLUMN "llm_config" jsonb;

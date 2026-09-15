@@ -50,6 +50,13 @@
       "when": 1787342978139,
       "tag": "0006_wonderful_skin",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1789501320799,
+      "tag": "0007_overjoyed_groot",
+      "breakpoints": true
     }
   ]
 }

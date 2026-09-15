@@ -39,6 +39,11 @@ export const profiles = pgTable("profiles", {
   // Dashboard "new jobs" filters — { minScore?: number, location?: string, company?: string }.
   // Persisted per-user so filter settings survive a return visit; see lib/dashboard-filters.ts.
   filters: jsonb("filters").notNull().default({}),
+  // Optional user-supplied LLM configuration — see lib/llm-config.ts for the shape, lib/crypto.ts
+  // for how each stored key is encrypted at rest, and lib/llm-client.ts for how a process (resume /
+  // coverLetter / jdParse) resolves its provider+model+key. Null means "use the app's own env-var
+  // key and default model for everything", the behavior before a user configures anything here.
+  llmConfig: jsonb("llm_config"),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
