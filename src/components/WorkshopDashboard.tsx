@@ -3,7 +3,28 @@
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
 
-type AtsNotes = { ok: boolean; missingSections: string[]; extractedPreview: string; pageCount?: number } | null;
+type KeywordScore = {
+  total: number;
+  grade: string;
+  parts: Record<string, number>;
+  matchedKeywords: string[];
+  missingKeywords: string[];
+  uncoveredRequirements: string[];
+  issues: string[];
+} | null;
+
+type Grounding = { checked: number; problems: { severity: string; excerpt: string; issue: string }[]; grounded: boolean } | null;
+
+type AtsNotes = {
+  ok: boolean;
+  missingSections: string[];
+  extractedPreview: string;
+  pageCount?: number;
+  // Present only on documents generated with a job description supplied — see
+  // lib/ats-score.ts / lib/grounding-check.ts.
+  keywordScore?: KeywordScore;
+  grounding?: Grounding;
+} | null;
 
 type Doc = {
   id: number;
@@ -50,6 +71,7 @@ export function WorkshopDashboard({
   const [docs, setDocs] = useState(initialDocuments);
   const [kind, setKind] = useState<"resume" | "cover_letter">("resume");
   const [jobId, setJobId] = useState("");
+  const [jobDescription, setJobDescription] = useState("");
   const [generating, setGenerating] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -105,7 +127,7 @@ export function WorkshopDashboard({
       const res = await fetch("/api/workshop/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind, jobId: jobId || undefined }),
+        body: JSON.stringify({ kind, jobId: jobId || undefined, jobDescription: jobDescription.trim() || undefined }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Generation failed");
@@ -263,6 +285,18 @@ export function WorkshopDashboard({
             {generating ? "Generating…" : "Generate"}
           </button>
         </div>
+        <label className="flex flex-col gap-1 text-xs text-foreground-muted">
+          <span>
+            Job description <span className="text-foreground-muted/70">(optional — paste it in for a real ATS keyword score and grounding check against this posting)</span>
+          </span>
+          <textarea
+            value={jobDescription}
+            onChange={(e) => setJobDescription(e.target.value)}
+            rows={4}
+            placeholder="Paste the job posting text here…"
+            className="w-full resize-y rounded border border-accent/30 bg-background px-2 py-1.5 text-sm text-foreground placeholder:text-foreground-muted/60"
+          />
+        </label>
 
         <div className="flex flex-col gap-2 border-t border-accent/15 pt-3">
           <span className="text-xs font-medium uppercase tracking-wide text-foreground-muted">Or bring your own</span>
@@ -425,6 +459,46 @@ export function WorkshopDashboard({
                   </button>
                 </div>
               </div>
+
+              {(openAtsNotes?.keywordScore || openAtsNotes?.grounding) && (
+                <div className="flex flex-col gap-1.5 border-b border-accent/15 bg-surface px-5 py-2.5 text-xs text-foreground-muted">
+                  {openAtsNotes.keywordScore && (
+                    <div>
+                      <span className="font-medium text-foreground">
+                        ATS keyword score: {openAtsNotes.keywordScore.total} ({openAtsNotes.keywordScore.grade})
+                      </span>
+                      {openAtsNotes.keywordScore.missingKeywords.length > 0 && (
+                        <span> · missing: {openAtsNotes.keywordScore.missingKeywords.slice(0, 12).join(", ")}</span>
+                      )}
+                      {openAtsNotes.keywordScore.issues.length > 0 && (
+                        <ul className="mt-1 list-inside list-disc">
+                          {openAtsNotes.keywordScore.issues.map((issue, i) => (
+                            <li key={i}>{issue}</li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+                  {openAtsNotes.grounding && (
+                    <div>
+                      <span className={openAtsNotes.grounding.grounded ? "text-accent" : "text-red-700"}>
+                        {openAtsNotes.grounding.grounded
+                          ? `✓ Grounded — ${openAtsNotes.grounding.checked} bullet(s)/paragraph(s) checked against your background`
+                          : `✕ ${openAtsNotes.grounding.problems.length} grounding flag(s)`}
+                      </span>
+                      {openAtsNotes.grounding.problems.length > 0 && (
+                        <ul className="mt-1 list-inside list-disc">
+                          {openAtsNotes.grounding.problems.slice(0, 8).map((p, i) => (
+                            <li key={i}>
+                              {p.issue} — <span className="italic">“{p.excerpt.slice(0, 120)}”</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
 
               {/* Overleaf-style split: source on the left, rendered PDF on the right, both full height. */}
               <div className="flex min-h-0 flex-1">

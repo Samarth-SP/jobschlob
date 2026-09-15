@@ -15,6 +15,11 @@ export async function POST(req: Request) {
   const body = await req.json();
   const kind: "resume" | "cover_letter" = body.kind === "cover_letter" ? "cover_letter" : "resume";
   const jobId: string | undefined = body.jobId || undefined;
+  // Free-text, pasted in by the user at generation time — not stored anywhere (the `jobs` table
+  // is a keyword-matched board, not a JD store; see lib/jd-parse.ts). Feeds the keyword-score and
+  // grounding checks in lib/ats-score.ts / lib/grounding-check.ts; the previous title/company-only
+  // path is unaffected when it's omitted.
+  const jobDescription: string | undefined = typeof body.jobDescription === "string" && body.jobDescription.trim() ? body.jobDescription.trim() : undefined;
 
   const background = await getProfile(userId);
   if (!background.trim()) {
@@ -22,6 +27,11 @@ export async function POST(req: Request) {
   }
 
   const job = jobId ? await getJobById(jobId) : null;
+  const jobInfo = job
+    ? { title: job.title, company: job.company, description: jobDescription }
+    : jobDescription
+      ? { title: "the role", company: "the company", description: jobDescription }
+      : undefined;
 
   // The model returns structured content (never LaTeX); lib/resume-scaffold.ts fills the fixed
   // house template and runs a compile → count-pages → trim loop until it fits one page. A
@@ -31,8 +41,8 @@ export async function POST(req: Request) {
   try {
     ({ latex, pdf, warnings, atsNotes } =
       kind === "cover_letter"
-        ? await buildCoverLetter(background, job ? { title: job.title, company: job.company } : { title: "the role", company: "the company" })
-        : await buildResume(background, job ? `${job.title} at ${job.company}` : undefined));
+        ? await buildCoverLetter(background, jobInfo ?? { title: "the role", company: "the company" })
+        : await buildResume(background, jobInfo));
   } catch (err) {
     if (err instanceof LatexCompileError) return NextResponse.json({ error: `Generation produced invalid LaTeX: ${err.message}` }, { status: 502 });
     throw err;

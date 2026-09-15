@@ -9,6 +9,9 @@ import {
 } from "./resume-template";
 import { compileLatex } from "./latex";
 import { checkAts, type AtsNotes } from "./ats-check";
+import { parseJobDescription, type ParsedJd } from "./jd-parse";
+import { scoreResume, resumeToPlainText } from "./ats-score";
+import { groundingCheckResume, groundingCheckCoverLetter } from "./grounding-check";
 
 const client = new Anthropic();
 
@@ -166,18 +169,43 @@ async function fitToOnePage(
   return { latex: compiled.source, pdf: compiled.pdf, warnings, atsNotes: ats };
 }
 
-export async function buildResume(background: string, jobDescription?: string): Promise<BuildResult> {
+// JD parsing is advisory (feeds the keyword-score/grounding-echo checks below, not the
+// generation itself) — a parse failure shouldn't take down the whole generate request, so this
+// degrades to "no structured JD" rather than throwing.
+async function tryParseJd(job?: { title: string; company: string; description?: string }): Promise<ParsedJd | null> {
+  if (!job?.description) return null;
+  try {
+    return await parseJobDescription(job.description, job.title, job.company);
+  } catch {
+    return null;
+  }
+}
+
+export async function buildResume(
+  background: string,
+  job?: { title: string; company: string; description?: string },
+): Promise<BuildResult> {
   const data = await callTool<ResumeData>(
     RESUME_SYSTEM,
-    `Background:\n\n${background}${jobDescription ? `\n\nTailor to this job: ${jobDescription}` : ""}`,
+    `Background:\n\n${background}${job ? `\n\nTailor to this job: ${job.title} at ${job.company}${job.description ? `\n\n${job.description}` : ""}` : ""}`,
     RESUME_TOOL,
   );
   if (!data?.name || !Array.isArray(data.experience)) throw new Error("emit_resume: malformed resume data");
-  return fitToOnePage(
+
+  const built = await fitToOnePage(
     () => renderResume(data),
     () => trimResume(data),
     "resume",
   );
+
+  // Scored/checked against the FINAL (post-trim) content, using the same `data` object the
+  // fitter mutated in place — a score computed before trimming could describe bullets that no
+  // longer exist in the document that got saved.
+  const jd = await tryParseJd(job);
+  const keywordScore = jd ? scoreResume(data, resumeToPlainText(data), jd) : undefined;
+  const grounding = groundingCheckResume(data, background, jd);
+
+  return { ...built, atsNotes: { ...built.atsNotes, keywordScore, grounding } };
 }
 
 export async function buildCoverLetter(
@@ -190,9 +218,17 @@ export async function buildCoverLetter(
     COVER_TOOL,
   );
   if (!data?.sender || !Array.isArray(data.paragraphs)) throw new Error("emit_cover_letter: malformed cover letter data");
-  return fitToOnePage(
+
+  const built = await fitToOnePage(
     () => renderCoverLetter(data),
     () => trimCoverLetter(data),
     "cover_letter",
   );
+
+  // No keyword score for cover letters (BoofSimplify's ats.py scoring is resume-specific too) —
+  // just the grounding check, which also screens for JD terms echoed back as the candidate's own.
+  const jd = await tryParseJd(job);
+  const grounding = groundingCheckCoverLetter(data, background, jd);
+
+  return { ...built, atsNotes: { ...built.atsNotes, grounding } };
 }

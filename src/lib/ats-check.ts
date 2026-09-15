@@ -11,6 +11,12 @@ export type AtsNotes = {
   missingSections: string[];
   extractedPreview: string;
   pageCount?: number; // optional: absent on rows written before the one-page fitter shipped
+  // Below: only present on documents generated (not uploaded) with a job description supplied —
+  // see lib/ats-score.ts (keyword/quality scoring against the posting) and lib/grounding-check.ts
+  // (numbers/credentials/JD-echo checked against profiles.background). Merged in by
+  // lib/resume-scaffold.ts, not computed here — this file only ever does PDF-parseability.
+  keywordScore?: import("./ats-score").AtsScoreResult;
+  grounding?: import("./grounding-check").GroundingResult;
 };
 
 const EXPECTED_MARKERS: Record<"resume" | "cover_letter", { label: string; pattern: RegExp }[]> = {
