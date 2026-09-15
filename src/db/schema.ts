@@ -31,21 +31,35 @@ export const trackedJobs = pgTable(
   (t) => [uniqueIndex("tracked_jobs_user_job_idx").on(t.userId, t.jobId)],
 );
 
-export const profiles = pgTable("profiles", {
-  userId: text("user_id").primaryKey(),
-  // Free-text corpus — experience, skills, goals. Scored against jobs (lib/match.ts) and
-  // scaffolded into resumes/cover letters (lib/resume-scaffold.ts).
-  background: text("background").notNull().default(""),
-  // Dashboard "new jobs" filters — { minScore?: number, location?: string, company?: string }.
-  // Persisted per-user so filter settings survive a return visit; see lib/dashboard-filters.ts.
-  filters: jsonb("filters").notNull().default({}),
-  // Optional user-supplied LLM configuration — see lib/llm-config.ts for the shape, lib/crypto.ts
-  // for how each stored key is encrypted at rest, and lib/llm-client.ts for how a process (resume /
-  // coverLetter / jdParse) resolves its provider+model+key. Null means "use the app's own env-var
-  // key and default model for everything", the behavior before a user configures anything here.
-  llmConfig: jsonb("llm_config"),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+export const profiles = pgTable(
+  "profiles",
+  {
+    userId: text("user_id").primaryKey(),
+    // Free-text corpus — experience, skills, goals. Scored against jobs (lib/match.ts) and
+    // scaffolded into resumes/cover letters (lib/resume-scaffold.ts).
+    background: text("background").notNull().default(""),
+    // Dashboard "new jobs" filters — { minScore?: number, location?: string, company?: string }.
+    // Persisted per-user so filter settings survive a return visit; see lib/dashboard-filters.ts.
+    filters: jsonb("filters").notNull().default({}),
+    // Optional user-supplied LLM configuration — see lib/llm-config.ts for the shape,
+    // lib/crypto.ts for how each stored key is encrypted at rest, and lib/llm-client.ts for how a
+    // process (resume / coverLetter / jdParse) resolves its provider+model+key. Null means "use
+    // the app's own env-var key and default model for everything", the behavior before a user
+    // configures anything here.
+    llmConfig: jsonb("llm_config"),
+    // Contact + eligibility facts the local auto-apply worker's deterministic field-mapping needs
+    // (first/last name, email, phone, location, links, work authorization, eeo, ...) — see
+    // lib/apply-identity.ts for the shape. Distinct from `background` (free prose for scoring/
+    // tailoring): a form filler needs discrete fields, not something to re-parse out of prose.
+    identity: jsonb("identity"),
+    // Bearer token the local BoofSimplify worker authenticates with against /api/apply/* — not
+    // tied to the NextAuth session, since the worker runs unattended, off-browser, on the user's
+    // own machine. Null until the user generates one on the profile page. See lib/apply-token.ts.
+    applyApiToken: text("apply_api_token"),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("profiles_apply_api_token_idx").on(t.applyApiToken)],
+);
 
 export const jobMatches = pgTable(
   "job_matches",
@@ -98,3 +112,29 @@ export const documents = pgTable("documents", {
   atsNotes: jsonb("ats_notes"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// A tracked job the user has queued for the local BoofSimplify worker (see boof/remote.py) to
+// prefill asynchronously — separate from trackedJobs rather than more nullable columns bolted
+// onto it, since this is a distinct lifecycle (queued/filled/needs_input/error) the worker drives,
+// not the user's own application status.
+export const applyTasks = pgTable(
+  "apply_tasks",
+  {
+    id: serial("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    jobId: text("job_id")
+      .notNull()
+      .references(() => jobs.id, { onDelete: "cascade" }),
+    // The tailored resume to upload — snapshotted at queue time so a later "set active" on a
+    // different document doesn't retroactively change what an already-queued task fills in with.
+    documentId: integer("document_id").references(() => documents.id, { onDelete: "set null" }),
+    status: text("status").notNull().default("queued"), // queued | filled | needs_input | error
+    notes: text("notes"), // human-readable status detail from the worker, e.g. an error message
+    // Per-field outcomes reported by the worker — [{ label, ok, note? }] — surfaced in the UI so
+    // the user knows what to check before submitting. See boof/apply/filler.py's return shape.
+    fieldFlags: jsonb("field_flags"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("apply_tasks_user_job_idx").on(t.userId, t.jobId)],
+);

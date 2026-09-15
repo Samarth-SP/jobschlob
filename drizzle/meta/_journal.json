@@ -57,6 +57,13 @@
       "when": 1789501320799,
       "tag": "0007_overjoyed_groot",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1789503092929,
+      "tag": "0008_lovely_masked_marvel",
+      "breakpoints": true
     }
   ]
 }
