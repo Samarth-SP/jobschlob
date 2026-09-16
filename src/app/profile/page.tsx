@@ -27,6 +27,7 @@ import { LLM_PROCESSES, type LlmConfig, type LlmProcess, type Provider } from "@
 import type { ApplyIdentity } from "@/lib/apply-identity";
 import { EMPTY_SEARCH_PREFERENCES } from "@/lib/search-preferences";
 import { runJobSearchForProfile } from "@/lib/job-search";
+import { generateRefineQuestions, applyRefineAnswers } from "@/lib/search-refine";
 
 export default async function ProfilePage() {
   const session = await auth();
@@ -158,6 +159,33 @@ export default async function ProfilePage() {
     }
   }
 
+  async function refineQuestions(fields: {
+    tracks: string[];
+    gradYear?: string;
+    locationsPreferred: string[];
+    locationsAcceptable: string[];
+    criteria: string;
+  }): Promise<{ questions: string[] } | { error: string }> {
+    "use server";
+    try {
+      return { questions: await generateRefineQuestions(userId, fields) };
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : "Failed to generate questions" };
+    }
+  }
+
+  async function applyRefine(
+    fields: { tracks: string[]; gradYear?: string; locationsPreferred: string[]; locationsAcceptable: string[]; criteria: string },
+    qa: { question: string; answer: string }[],
+  ): Promise<{ criteria: string } | { error: string }> {
+    "use server";
+    try {
+      return { criteria: await applyRefineAnswers(userId, fields, qa) };
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : "Failed to apply answers" };
+    }
+  }
+
   async function runSearchNow(): Promise<RunNowResult> {
     "use server";
     try {
@@ -192,7 +220,13 @@ export default async function ProfilePage() {
       </p>
       <ProfileForm action={save} initialBackground={background} />
       <LlmSettingsForm action={saveLlm} initial={redactedLlmConfig} />
-      <SearchPreferencesForm action={saveSearchPrefs} runNow={runSearchNow} initial={searchPreferences} />
+      <SearchPreferencesForm
+        action={saveSearchPrefs}
+        runNow={runSearchNow}
+        refineQuestions={refineQuestions}
+        applyRefine={applyRefine}
+        initial={searchPreferences}
+      />
       <IdentityForm action={saveIdentity} initial={identity} />
       <ApplyTokenSection hasToken={applyTokenSet} regenerate={regenerateToken} clear={clearToken} />
     </main>
