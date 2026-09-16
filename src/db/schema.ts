@@ -56,6 +56,11 @@ export const profiles = pgTable(
     // tied to the NextAuth session, since the worker runs unattended, off-browser, on the user's
     // own machine. Null until the user generates one on the profile page. See lib/apply-token.ts.
     applyApiToken: text("apply_api_token"),
+    // Personalized job-search criteria (tracks/categories, grad year, location tiers, free-text
+    // notes) driving the LLM-powered discovery in lib/job-search.ts — distinct from `filters`
+    // (which only narrows what's already in the shared jobs table for display). See
+    // lib/search-preferences.ts for the shape. Null means search is off for this user.
+    searchPreferences: jsonb("search_preferences"),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("profiles_apply_api_token_idx").on(t.applyApiToken)],

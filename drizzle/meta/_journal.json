@@ -64,6 +64,13 @@
       "when": 1789503092929,
       "tag": "0008_lovely_masked_marvel",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1789533582382,
+      "tag": "0009_early_vulcan",
+      "breakpoints": true
     }
   ]
 }
