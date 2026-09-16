@@ -87,9 +87,11 @@ export async function callTool<T>(
 // which callTool()'s always-forced `tool_choice: {type:"tool"}` can't express (that forces a
 // single custom tool immediately — incompatible with also giving the model Anthropic's
 // server-executed web_search tool to call zero-or-more times first). So this is Anthropic-only,
-// and deliberately does NOT go through resolve()'s "fall back to the app's env-var key" behavior:
-// automated web search running on the app's own shared key would mean one user's search habits
-// billing the app owner. A user must configure their own Anthropic key to use this at all.
+// with its own key resolution rather than routing through resolve() (which is keyed by
+// LlmProcess/routing, neither of which job search has). Same fallback as every other process
+// though: a user's own key if they've set one, else the app's shared ANTHROPIC_API_KEY — this
+// runs daily via search.yml's cron, so a user who never configures their own key still gets it,
+// billed to the app's own key, exactly like resume/coverLetter/jdParse already default to today.
 export async function runWebSearchTool<T>(
   userId: string,
   system: string,
@@ -99,10 +101,10 @@ export async function runWebSearchTool<T>(
 ): Promise<T> {
   const config = await getLlmConfig(userId);
   const stored = config?.keys?.anthropic;
-  if (!stored) {
-    throw new Error("Configure your own Anthropic key on the profile page to use job search.");
+  const apiKey = stored ? decryptSecret(stored) : process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    throw new Error("No Anthropic key available — set ANTHROPIC_API_KEY, or add your own key on the profile page.");
   }
-  const apiKey = decryptSecret(stored);
 
   const client = new Anthropic({ apiKey });
   const res = await client.messages.create({

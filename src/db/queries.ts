@@ -218,16 +218,13 @@ export async function setSearchPreferences(userId: string, searchPreferences: Se
 }
 
 // job-search.ts (both the "Search now" action and the search.yml cron script) — every profile
-// with search enabled AND a personally-configured Anthropic key (never the app's own key for this
-// process, by design; see lib/llm-client.ts's runWebSearchTool). Filtered in JS, not SQL: jsonb
-// predicates here would be harder to read than they're worth for a table this small.
+// with search enabled. Doesn't gate on a personally-configured key: runWebSearchTool falls back
+// to the app's own ANTHROPIC_API_KEY same as every other process, so a profile with search
+// enabled and no key of its own still runs (billed to the app's key). Filtered in JS, not SQL:
+// jsonb predicates here would be harder to read than they're worth for a table this small.
 export async function getSearchEnabledProfiles() {
   const rows = await db.select().from(profiles);
-  return rows.filter((r) => {
-    const prefs = r.searchPreferences as SearchPreferences | null;
-    const llm = r.llmConfig as LlmConfig | null;
-    return Boolean(prefs?.enabled) && Boolean(llm?.keys?.anthropic);
-  });
+  return rows.filter((r) => Boolean((r.searchPreferences as SearchPreferences | null)?.enabled));
 }
 
 // Ingest-only — populates jobMatches for a batch of newly-seen jobs against one user.
