@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { motion, AnimatePresence } from "motion/react";
+import { ARCHETYPE_LIST, suggestArchetype, type ArchetypeKey } from "@/lib/resume-archetypes";
 
 type KeywordScore = {
   total: number;
@@ -66,12 +67,16 @@ export function WorkshopDashboard({
   jobs,
 }: {
   initialDocuments: Doc[];
-  jobs: { id: string; title: string; company: string }[];
+  jobs: { id: string; title: string; company: string; category: string | null }[];
 }) {
   const [docs, setDocs] = useState(initialDocuments);
   const [kind, setKind] = useState<"resume" | "cover_letter">("resume");
   const [jobId, setJobId] = useState("");
   const [jobDescription, setJobDescription] = useState("");
+  const [archetype, setArchetype] = useState<ArchetypeKey>("generalist");
+  // The user's own pick always wins once they've touched the dropdown — this only auto-suggests
+  // the FIRST time a job is selected, it never overrides a deliberate choice.
+  const [archetypeTouched, setArchetypeTouched] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -127,7 +132,12 @@ export function WorkshopDashboard({
       const res = await fetch("/api/workshop/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ kind, jobId: jobId || undefined, jobDescription: jobDescription.trim() || undefined }),
+        body: JSON.stringify({
+          kind,
+          jobId: jobId || undefined,
+          jobDescription: jobDescription.trim() || undefined,
+          archetype,
+        }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Generation failed");
@@ -267,13 +277,35 @@ export function WorkshopDashboard({
           </select>
           <select
             value={jobId}
-            onChange={(e) => setJobId(e.target.value)}
+            onChange={(e) => {
+              const nextId = e.target.value;
+              setJobId(nextId);
+              if (!archetypeTouched) {
+                const job = jobs.find((j) => j.id === nextId);
+                setArchetype(suggestArchetype(job?.category));
+              }
+            }}
             className="rounded border border-accent/30 bg-background px-2 py-1.5 text-sm text-foreground"
           >
             <option value="">General (no specific job)</option>
             {jobs.map((j) => (
               <option key={j.id} value={j.id}>
                 {j.title} — {j.company}
+              </option>
+            ))}
+          </select>
+          <select
+            value={archetype}
+            onChange={(e) => {
+              setArchetype(e.target.value as ArchetypeKey);
+              setArchetypeTouched(true);
+            }}
+            title="Resume style — which conventions (section order, bullet style, what's emphasized) the writer follows"
+            className="rounded border border-accent/30 bg-background px-2 py-1.5 text-sm text-foreground"
+          >
+            {ARCHETYPE_LIST.map((a) => (
+              <option key={a.key} value={a.key}>
+                {a.label}
               </option>
             ))}
           </select>

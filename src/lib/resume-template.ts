@@ -37,8 +37,15 @@ export type ResumeData = {
   education: ResumeEntry[];
   experience: ResumeEntry[];
   projects: ResumeProject[];
+  leadership: ResumeEntry[]; // activities/leadership roles — optional, used by e.g. the consulting archetype
   skills: ResumeSkillGroup[];
 };
+
+// Which sections a resume has and in what order — archetype-driven (see resume-archetypes.ts).
+// Defaults below match this file's original, hardcoded education→experience→projects→skills order.
+export type SectionKey = "education" | "experience" | "projects" | "leadership" | "skills";
+export const DEFAULT_SECTION_ORDER: SectionKey[] = ["education", "experience", "projects", "skills"];
+export const DEFAULT_TRIM_PRIORITY: SectionKey[] = ["projects", "experience"];
 
 export type CoverLetterData = {
   sender: string;
@@ -157,15 +164,28 @@ const RESUME_PREAMBLE = String.raw`\documentclass[letterpaper,11pt]{article}
 \newcommand{\resumeItemListEnd}{\end{itemize}\vspace{-5pt}}
 `;
 
-export function renderResume(d: ResumeData): string {
+// One renderer per possible section, each returning null when that section has nothing to show
+// — looked up by key so an archetype's sectionOrder can freely reorder/omit/include them.
+function sectionRenderers(d: ResumeData): Record<SectionKey, () => string | null> {
+  return {
+    education: () => (d.education?.length ? listSection("Education", d.education.map(entryBlock)) : null),
+    experience: () => (d.experience?.length ? listSection("Experience", d.experience.map(entryBlock)) : null),
+    projects: () => (d.projects?.length ? listSection("Projects", d.projects.map(projectBlock)) : null),
+    leadership: () => (d.leadership?.length ? listSection("Leadership & Activities", d.leadership.map(entryBlock)) : null),
+    skills: () => (d.skills?.length ? skillsSection(d.skills) : null),
+  };
+}
+
+export function renderResume(d: ResumeData, sectionOrder: SectionKey[] = DEFAULT_SECTION_ORDER): string {
   const contact = (d.contact ?? []).map(renderContact).join(" \\textbar{} ");
   const parts: string[] = [
     `\\begin{center}\n  \\textbf{\\Huge \\scshape ${esc(d.name)}} \\\\ \\vspace{1pt}\n  \\small ${contact}\n\\end{center}`,
   ];
-  if (d.education?.length) parts.push(listSection("Education", d.education.map(entryBlock)));
-  if (d.experience?.length) parts.push(listSection("Experience", d.experience.map(entryBlock)));
-  if (d.projects?.length) parts.push(listSection("Projects", d.projects.map(projectBlock)));
-  if (d.skills?.length) parts.push(skillsSection(d.skills));
+  const renderers = sectionRenderers(d);
+  for (const key of sectionOrder) {
+    const rendered = renderers[key]();
+    if (rendered) parts.push(rendered);
+  }
   return `${RESUME_PREAMBLE}\n\\begin{document}\n\n${parts.join("\n\n")}\n\n\\end{document}\n`;
 }
 
@@ -205,9 +225,17 @@ ${esc(d.sender)}
 }
 
 // One-page fitter hooks: each removes the single lowest-priority piece and returns its text, or
-// null when nothing more can be cut. Both mutate the passed object. Education is never trimmed.
-export function trimResume(d: ResumeData): string | null {
-  for (const pool of [d.projects ?? [], d.experience ?? []] as { bullets: string[] }[][]) {
+// null when nothing more can be cut. Both mutate the passed object. Education and skills are
+// never trimmed — trimPriority only ever names bullet-bearing sections.
+export function trimResume(d: ResumeData, trimPriority: SectionKey[] = DEFAULT_TRIM_PRIORITY): string | null {
+  const pools: Partial<Record<SectionKey, { bullets: string[] }[]>> = {
+    projects: d.projects ?? [],
+    experience: d.experience ?? [],
+    leadership: d.leadership ?? [],
+  };
+  for (const key of trimPriority) {
+    const pool = pools[key];
+    if (!pool) continue;
     const target = [...pool]
       .filter((e) => (e.bullets?.length ?? 0) > 1)
       .sort((a, b) => b.bullets.length - a.bullets.length)[0];

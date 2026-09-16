@@ -1,7 +1,8 @@
 import Link from "next/link";
 import { auth } from "@/lib/auth";
-import { getTrackedJobs, getProfile, getDocuments } from "@/db/queries";
+import { getTrackedJobs, getProfile, getDocuments, getEvidenceBank } from "@/db/queries";
 import { WorkshopDashboard } from "@/components/WorkshopDashboard";
+import { isEmptyEvidenceBank } from "@/lib/evidence";
 
 export default async function WorkshopPage() {
   const session = await auth();
@@ -9,13 +10,14 @@ export default async function WorkshopPage() {
     return <main className="p-6">Sign in to use the workshop.</main>;
   }
   const userId = session.user.email;
-  const [tracked, background, documents] = await Promise.all([
+  const [tracked, background, documents, evidenceBank] = await Promise.all([
     getTrackedJobs(userId),
     getProfile(userId),
     getDocuments(userId),
+    getEvidenceBank(userId),
   ]);
 
-  if (!background.trim()) {
+  if (!background.trim() && isEmptyEvidenceBank(evidenceBank)) {
     return (
       <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-4 px-6 py-8">
         <h1 className="text-xl font-semibold text-pop">Workshop</h1>
@@ -30,7 +32,7 @@ export default async function WorkshopPage() {
     );
   }
 
-  const jobs = tracked.map(({ job }) => ({ id: job.id, title: job.title, company: job.company }));
+  const jobs = tracked.map(({ job }) => ({ id: job.id, title: job.title, company: job.company, category: job.category }));
 
   return (
     <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-4 px-6 py-8">

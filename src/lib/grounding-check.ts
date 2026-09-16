@@ -92,6 +92,12 @@ export function groundingCheckResume(resume: ResumeData, background: string, jd:
       problems.push(...checkPassage(b, background, backgroundNums, jd, false));
     }
   }
+  for (const l of resume.leadership ?? []) {
+    for (const b of l.bullets ?? []) {
+      checked++;
+      problems.push(...checkPassage(b, background, backgroundNums, jd, false));
+    }
+  }
   return { checked, problems, grounded: !problems.some((p) => p.severity === "high") };
 }
 

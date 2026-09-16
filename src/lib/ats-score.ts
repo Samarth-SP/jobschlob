@@ -126,6 +126,7 @@ function bulletsOf(resume: ResumeData): string[] {
   const out: string[] = [];
   for (const e of resume.experience ?? []) out.push(...(e.bullets ?? []));
   for (const p of resume.projects ?? []) out.push(...(p.bullets ?? []));
+  for (const l of resume.leadership ?? []) out.push(...(l.bullets ?? []));
   return out;
 }
 
@@ -229,6 +230,13 @@ export function resumeToPlainText(d: ResumeData): string {
     for (const p of d.projects as ResumeProject[]) {
       lines.push(`${p.name}  ${p.dates}`);
       lines.push(...(p.bullets ?? []).map((b) => `• ${b}`));
+    }
+  }
+  if (d.leadership?.length) {
+    lines.push("", "LEADERSHIP & ACTIVITIES");
+    for (const e of d.leadership) {
+      lines.push(`${e.role} — ${e.organization}  ${e.dates}  ${e.location}`.trim());
+      lines.push(...(e.bullets ?? []).map((b) => `• ${b}`));
     }
   }
   if (d.skills?.length) {

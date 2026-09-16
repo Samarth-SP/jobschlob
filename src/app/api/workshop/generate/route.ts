@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { getProfile, getJobById, saveDocument, setActiveDocument } from "@/db/queries";
+import { getProfile, getJobById, getEvidenceBank, getSearchPreferences, saveDocument, setActiveDocument } from "@/db/queries";
 import { buildResume, buildCoverLetter } from "@/lib/resume-scaffold";
 import { LatexCompileError } from "@/lib/latex";
 import { uploadDocumentPdf } from "@/lib/blob-storage";
@@ -20,10 +20,15 @@ export async function POST(req: Request) {
   // grounding checks in lib/ats-score.ts / lib/grounding-check.ts; the previous title/company-only
   // path is unaffected when it's omitted.
   const jobDescription: string | undefined = typeof body.jobDescription === "string" && body.jobDescription.trim() ? body.jobDescription.trim() : undefined;
+  const archetype: string | undefined = typeof body.archetype === "string" ? body.archetype : undefined;
 
-  const background = await getProfile(userId);
-  if (!background.trim()) {
-    return NextResponse.json({ error: "Set your background in your profile first." }, { status: 400 });
+  const [background, evidenceBank, searchPreferences] = await Promise.all([
+    getProfile(userId),
+    getEvidenceBank(userId),
+    getSearchPreferences(userId),
+  ]);
+  if (!background.trim() && !evidenceBank) {
+    return NextResponse.json({ error: "Add your resume or background on your profile first." }, { status: 400 });
   }
 
   const job = jobId ? await getJobById(jobId) : null;
@@ -41,8 +46,8 @@ export async function POST(req: Request) {
   try {
     ({ latex, pdf, warnings, atsNotes } =
       kind === "cover_letter"
-        ? await buildCoverLetter(userId, background, jobInfo ?? { title: "the role", company: "the company" })
-        : await buildResume(userId, background, jobInfo));
+        ? await buildCoverLetter(userId, background, jobInfo ?? { title: "the role", company: "the company" }, evidenceBank, searchPreferences)
+        : await buildResume(userId, background, jobInfo, evidenceBank, searchPreferences, archetype));
   } catch (err) {
     if (err instanceof LatexCompileError) return NextResponse.json({ error: `Generation produced invalid LaTeX: ${err.message}` }, { status: 502 });
     throw err;

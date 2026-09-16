@@ -12,12 +12,16 @@ import { parseJobDescription, type ParsedJd } from "./jd-parse";
 import { scoreResume, resumeToPlainText } from "./ats-score";
 import { groundingCheckResume, groundingCheckCoverLetter } from "./grounding-check";
 import { callTool, type LlmTool } from "./llm-client";
+import { type EvidenceBank, isEmptyEvidenceBank } from "./evidence";
+import { rankEvidenceBullets, serializeEvidenceBank } from "./evidence-rank";
+import type { SearchPreferences } from "./search-preferences";
+import { getArchetype, styleBrief, type ResumeArchetype } from "./resume-archetypes";
 
 // Prompt-only anti-fabrication is a soft guardrail, not a guarantee (there's no mechanical check
 // on the output against the background). Added after this exact model invented a plausible phone
 // number, email, and GitHub handle for a background that simply didn't include contact info.
 const ANTI_FABRICATION =
-  "Only use facts present in the background text — never invent, estimate, or embellish a skill, " +
+  "Only use facts present in the material given below — never invent, estimate, or embellish a skill, " +
   "metric, employer, date, or contact detail (email, phone, GitHub, LinkedIn) that isn't literally there. " +
   "If a normally-expected fact is missing (e.g. no phone number given), use a bracketed placeholder like " +
   "[phone] rather than making one up. Tailoring means reordering and rephrasing what's real to foreground " +
@@ -43,7 +47,7 @@ const ENTRY_ITEM = {
 const RESUME_TOOL: LlmTool = {
   name: "emit_resume",
   description:
-    "Return the tailored resume as structured content. Layout, fonts and spacing are handled downstream — supply plain text only, no LaTeX or markdown. Sections render in the order education, experience, projects, skills.",
+    "Return the tailored resume as structured content. Layout, fonts and spacing are handled downstream — supply plain text only, no LaTeX or markdown. Section order for this role family is given in the system prompt; only populate a section this resume actually renders.",
   input_schema: {
     type: "object",
     properties: {
@@ -72,6 +76,11 @@ const RESUME_TOOL: LlmTool = {
           },
           required: ["name", "dates", "bullets"],
         },
+      },
+      leadership: {
+        type: "array",
+        description: "Optional — clubs, activities, volunteering, leadership roles (not paid employment). Only if the system prompt's section order includes it and the evidence supports one.",
+        items: ENTRY_ITEM,
       },
       skills: {
         type: "array",
@@ -111,13 +120,25 @@ const COVER_TOOL: LlmTool = {
   },
 };
 
-const RESUME_SYSTEM =
-  "You turn a candidate's background into a tailored, strictly single-page resume in a fixed template " +
-  "(sections: education, experience, projects, skills — projects optional). Hard limits: at most 4–5 roles; " +
-  "1–3 bullets per role, fewer for older/less-relevant ones; each bullet ONE line (~25 words) starting with a " +
-  "strong past-tense verb, strongest bullet first so trimming from the end degrades gracefully. Favor depth on " +
-  "recent, job-relevant work over listing everything. Skills grouped into 4–8 labelled categories. " +
-  ANTI_FABRICATION;
+// Archetype-parameterized: the physical constraints (one page, bullet length/count, trimming
+// behavior) never change — they're properties of the fixed LaTeX template — but which sections
+// exist, in what order, and what the bullets should emphasize come from the selected archetype
+// (lib/resume-archetypes.ts) so the model's content choices actually match what the template will
+// render, instead of every generation being shaped for the old hardcoded education/experience/
+// projects/skills order regardless of role family.
+function resumeSystem(archetype: ResumeArchetype): string {
+  return (
+    "You turn a candidate's evidence into a tailored, strictly single-page resume in a fixed visual " +
+    "template — you choose section order and content, never layout, fonts or spacing. Hard limits: at " +
+    "most 4–5 roles; 1–3 bullets per role, fewer for older/less-relevant ones; each bullet ONE line " +
+    "(~25 words) starting with a strong past-tense verb, strongest bullet first so trimming from the " +
+    "end degrades gracefully. Favor depth on recent, job-relevant work over listing everything. Skills " +
+    "grouped into 4–8 labelled categories.\n\n" +
+    styleBrief(archetype) +
+    "\n\n" +
+    ANTI_FABRICATION
+  );
+}
 
 const COVER_SYSTEM =
   "You write a concise, specific, single-page cover letter: 2–3 short paragraphs that connect this " +
@@ -165,32 +186,59 @@ async function tryParseJd(userId: string, job?: { title: string; company: string
   }
 }
 
+// When an evidence bank is present, the JD has to be parsed BEFORE generation (not just for
+// post-hoc scoring, as before) so its keywords can rank which bullets the model even sees —
+// see evidence-rank.ts. A job-less "generalized" resume still ranks (recency + whether a bullet
+// carries a number + a soft nudge from the user's own stated search preferences) rather than
+// handing over an unranked dump.
+function contentBlock(
+  background: string,
+  evidenceBank: EvidenceBank | null | undefined,
+  jd: ParsedJd | null,
+  prefs: SearchPreferences | null | undefined,
+): { label: string; text: string; usedBank: boolean } {
+  if (evidenceBank && !isEmptyEvidenceBank(evidenceBank)) {
+    const ranked = rankEvidenceBullets(evidenceBank, jd ?? undefined, prefs);
+    return { label: "Evidence bank", text: serializeEvidenceBank(evidenceBank, ranked), usedBank: true };
+  }
+  return { label: "Background", text: background, usedBank: false };
+}
+
 export async function buildResume(
   userId: string,
   background: string,
   job?: { title: string; company: string; description?: string },
+  evidenceBank?: EvidenceBank | null,
+  prefs?: SearchPreferences | null,
+  archetypeKey?: string | null,
 ): Promise<BuildResult> {
+  const archetype = getArchetype(archetypeKey);
+  const jd = await tryParseJd(userId, job);
+  const content = contentBlock(background, evidenceBank, jd, prefs);
+
   const data = await callTool<ResumeData>(
     userId,
     "resume",
-    RESUME_SYSTEM,
-    `Background:\n\n${background}${job ? `\n\nTailor to this job: ${job.title} at ${job.company}${job.description ? `\n\n${job.description}` : ""}` : ""}`,
+    resumeSystem(archetype),
+    `${content.label}:\n\n${content.text}${job ? `\n\nTailor to this job: ${job.title} at ${job.company}${job.description ? `\n\n${job.description}` : ""}` : ""}`,
     RESUME_TOOL,
   );
   if (!data?.name || !Array.isArray(data.experience)) throw new Error("emit_resume: malformed resume data");
 
   const built = await fitToOnePage(
-    () => renderResume(data),
-    () => trimResume(data),
+    () => renderResume(data, archetype.sectionOrder),
+    () => trimResume(data, archetype.trimPriority),
     "resume",
   );
 
   // Scored/checked against the FINAL (post-trim) content, using the same `data` object the
   // fitter mutated in place — a score computed before trimming could describe bullets that no
   // longer exist in the document that got saved.
-  const jd = await tryParseJd(userId, job);
   const keywordScore = jd ? scoreResume(data, resumeToPlainText(data), jd) : undefined;
-  const grounding = groundingCheckResume(data, background, jd);
+  // Ground truth for the anti-fabrication check is background + the evidence-bank digest (when
+  // used) — checking against background alone would flag a real bank-only fact as invented.
+  const groundTruth = content.usedBank ? `${background}\n\n${content.text}` : background;
+  const grounding = groundingCheckResume(data, groundTruth, jd);
 
   return { ...built, atsNotes: { ...built.atsNotes, keywordScore, grounding } };
 }
@@ -199,12 +247,17 @@ export async function buildCoverLetter(
   userId: string,
   background: string,
   job: { title: string; company: string; description?: string },
+  evidenceBank?: EvidenceBank | null,
+  prefs?: SearchPreferences | null,
 ): Promise<BuildResult> {
+  const jd = await tryParseJd(userId, job);
+  const content = contentBlock(background, evidenceBank, jd, prefs);
+
   const data = await callTool<CoverLetterData>(
     userId,
     "coverLetter",
     COVER_SYSTEM,
-    `Background:\n\n${background}\n\nJob: ${job.title} at ${job.company}${job.description ? `\n\n${job.description}` : ""}`,
+    `${content.label}:\n\n${content.text}\n\nJob: ${job.title} at ${job.company}${job.description ? `\n\n${job.description}` : ""}`,
     COVER_TOOL,
   );
   if (!data?.sender || !Array.isArray(data.paragraphs)) throw new Error("emit_cover_letter: malformed cover letter data");
@@ -217,8 +270,8 @@ export async function buildCoverLetter(
 
   // No keyword score for cover letters (BoofSimplify's ats.py scoring is resume-specific too) —
   // just the grounding check, which also screens for JD terms echoed back as the candidate's own.
-  const jd = await tryParseJd(userId, job);
-  const grounding = groundingCheckCoverLetter(data, background, jd);
+  const groundTruth = content.usedBank ? `${background}\n\n${content.text}` : background;
+  const grounding = groundingCheckCoverLetter(data, groundTruth, jd);
 
   return { ...built, atsNotes: { ...built.atsNotes, grounding } };
 }

@@ -13,6 +13,8 @@ import {
   clearApplyToken,
   getSearchPreferences,
   setSearchPreferences,
+  getEvidenceBank,
+  setEvidenceBank,
 } from "@/db/queries";
 import { scoreJobForUser } from "@/lib/match";
 import { EXTENDED_RETENTION_DAYS } from "@/lib/company-tier";
@@ -22,12 +24,15 @@ import { LlmSettingsForm, type LlmSettingsResult, type RedactedLlmConfig } from 
 import { IdentityForm, type IdentityResult } from "@/components/IdentityForm";
 import { ApplyTokenSection } from "@/components/ApplyTokenSection";
 import { SearchPreferencesForm, type SearchPrefsResult, type RunNowResult } from "@/components/SearchPreferencesForm";
+import { EvidenceBankPanel } from "@/components/EvidenceBankPanel";
 import { encryptSecret } from "@/lib/crypto";
 import { LLM_PROCESSES, type LlmConfig, type LlmProcess, type Provider } from "@/lib/llm-config";
 import type { ApplyIdentity } from "@/lib/apply-identity";
 import { EMPTY_SEARCH_PREFERENCES } from "@/lib/search-preferences";
 import { runJobSearchForProfile } from "@/lib/job-search";
 import { generateRefineQuestions, applyRefineAnswers } from "@/lib/search-refine";
+import { EMPTY_EVIDENCE_BANK, assignEvidenceIds, type EvidenceBank } from "@/lib/evidence";
+import { findGaps, generateFollowupQuestions, applyFollowupAnswers, type Gap } from "@/lib/evidence-interview";
 
 export default async function ProfilePage() {
   const session = await auth();
@@ -45,6 +50,8 @@ export default async function ProfilePage() {
   const identity = (await getIdentity(userId)) ?? {};
   const applyTokenSet = await hasApplyToken(userId);
   const searchPreferences = (await getSearchPreferences(userId)) ?? EMPTY_SEARCH_PREFERENCES;
+  const evidenceBank = await getEvidenceBank(userId);
+  const evidenceGaps = evidenceBank ? findGaps(evidenceBank) : [];
 
   async function save(_prev: SaveResult, formData: FormData): Promise<SaveResult> {
     "use server";
@@ -197,6 +204,45 @@ export default async function ProfilePage() {
     }
   }
 
+  async function saveEvidenceBank(bank: EvidenceBank): Promise<{ ok: true } | { error: string }> {
+    "use server";
+    try {
+      await setEvidenceBank(userId, assignEvidenceIds(bank));
+      revalidatePath("/profile");
+      return { ok: true };
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : "Failed to save" };
+    }
+  }
+
+  async function askEvidenceGap(gap: Gap): Promise<{ questions: string[] } | { error: string }> {
+    "use server";
+    try {
+      const bank = (await getEvidenceBank(userId)) ?? EMPTY_EVIDENCE_BANK;
+      const questions = await generateFollowupQuestions(userId, bank, gap);
+      if (!questions.length) return { error: "Couldn't find anything new to ask here — it may have changed." };
+      return { questions };
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : "Failed to generate questions" };
+    }
+  }
+
+  async function answerEvidenceGap(
+    gap: Gap,
+    qa: { question: string; answer: string }[],
+  ): Promise<{ ok: true } | { error: string }> {
+    "use server";
+    try {
+      const bank = (await getEvidenceBank(userId)) ?? EMPTY_EVIDENCE_BANK;
+      const updated = await applyFollowupAnswers(userId, bank, gap, qa);
+      await setEvidenceBank(userId, updated);
+      revalidatePath("/profile");
+      return { ok: true };
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : "Failed to save answers" };
+    }
+  }
+
   async function regenerateToken(): Promise<string> {
     "use server";
     const token = await regenerateApplyToken(userId);
@@ -214,10 +260,24 @@ export default async function ProfilePage() {
     <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-4 px-6 py-8">
       <h1 className="text-xl font-semibold text-pop">Profile</h1>
       <p className="text-sm text-foreground-muted">
-        Write your background in plain text — experience, skills, what you&apos;re looking for.
-        This is what job compatibility is scored against, and what the workshop scaffolds into
-        resumes and cover letters.
+        Upload your resume below and the workshop reads it into structured, citable evidence — that&apos;s what
+        job compatibility is scored against and what resumes/cover letters get scaffolded from. The plain-text
+        box further down is a supplementary catch-all for anything that doesn&apos;t fit on a resume.
       </p>
+      <EvidenceBankPanel
+        initialBank={evidenceBank}
+        initialGaps={evidenceGaps}
+        saveBank={saveEvidenceBank}
+        askGap={askEvidenceGap}
+        answerGap={answerEvidenceGap}
+      />
+      <div>
+        <h2 className="text-sm font-semibold text-foreground">Anything else</h2>
+        <p className="mt-1 text-xs text-foreground-muted">
+          Free text — goals, preferences, context that doesn&apos;t fit the evidence bank above. Also scored
+          against jobs, and used by the workshop when there&apos;s no evidence bank yet.
+        </p>
+      </div>
       <ProfileForm action={save} initialBackground={background} />
       <LlmSettingsForm action={saveLlm} initial={redactedLlmConfig} />
       <SearchPreferencesForm

@@ -36,6 +36,19 @@ const EXPECTED_MARKERS: Record<"resume" | "cover_letter", { label: string; patte
 // unrelated edge case (a font quirk, an internal xref pattern it doesn't like, etc.) shouldn't
 // take down the whole generate/upload/recompile request over what's an advisory check. Every
 // caller gets a degraded-but-valid AtsNotes back instead of an unhandled 500.
+// Full extracted text, not the 500-char preview `checkAts` keeps — for feeding an uploaded
+// resume PDF into lib/evidence-extract.ts. Shares the same pdfjs-dist Node-runtime shims above
+// (module-load order matters, see the comment there) rather than duplicating them in a second
+// file.
+export async function extractPdfText(pdf: Buffer): Promise<string> {
+  if (!g.pdfjsWorker) g.pdfjsWorker = await import("pdfjs-dist/legacy/build/pdf.worker.mjs");
+  const { PDFParse } = await import("pdf-parse");
+  const parser = new PDFParse({ data: pdf });
+  const { text } = await parser.getText();
+  await parser.destroy();
+  return text;
+}
+
 export async function checkAts(pdf: Buffer, kind: "resume" | "cover_letter" = "resume"): Promise<AtsNotes> {
   try {
     // pdfjs-dist has no real Worker in Node, so it falls back to a "fake worker" that dynamically

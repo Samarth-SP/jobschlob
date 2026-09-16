@@ -5,6 +5,7 @@ import type { DashboardFilters } from "@/lib/dashboard-filters";
 import type { LlmConfig } from "@/lib/llm-config";
 import type { SearchPreferences } from "@/lib/search-preferences";
 import type { ApplyIdentity } from "@/lib/apply-identity";
+import type { EvidenceBank } from "@/lib/evidence";
 import { generateApplyToken, hashApplyToken } from "@/lib/apply-token";
 import {
   DEFAULT_RETENTION_DAYS,
@@ -215,6 +216,18 @@ export async function setSearchPreferences(userId: string, searchPreferences: Se
     .insert(profiles)
     .values({ userId, searchPreferences })
     .onConflictDoUpdate({ target: profiles.userId, set: { searchPreferences, updatedAt: new Date() } });
+}
+
+export async function getEvidenceBank(userId: string): Promise<EvidenceBank | null> {
+  const [row] = await db.select({ evidenceBank: profiles.evidenceBank }).from(profiles).where(eq(profiles.userId, userId));
+  return (row?.evidenceBank as EvidenceBank | null) ?? null;
+}
+
+export async function setEvidenceBank(userId: string, evidenceBank: EvidenceBank) {
+  await db
+    .insert(profiles)
+    .values({ userId, evidenceBank })
+    .onConflictDoUpdate({ target: profiles.userId, set: { evidenceBank, updatedAt: new Date() } });
 }
 
 // job-search.ts (both the "Search now" action and the search.yml cron script) — every profile
