@@ -22,45 +22,54 @@ export async function POST(req: Request) {
   const jobDescription: string | undefined = typeof body.jobDescription === "string" && body.jobDescription.trim() ? body.jobDescription.trim() : undefined;
   const archetype: string | undefined = typeof body.archetype === "string" ? body.archetype : undefined;
 
-  const [background, evidenceBank, searchPreferences] = await Promise.all([
-    getProfile(userId),
-    getEvidenceBank(userId),
-    getSearchPreferences(userId),
-  ]);
-  if (!background.trim() && !evidenceBank) {
-    return NextResponse.json({ error: "Add your resume or background on your profile first." }, { status: 400 });
-  }
-
-  const job = jobId ? await getJobById(jobId) : null;
-  const jobInfo = job
-    ? { title: job.title, company: job.company, description: jobDescription }
-    : jobDescription
-      ? { title: "the role", company: "the company", description: jobDescription }
-      : undefined;
-
-  // The model returns structured content (never LaTeX); lib/resume-scaffold.ts fills the fixed
-  // house template and runs a compile → count-pages → trim loop until it fits one page. A
-  // LatexCompileError here would mean the template itself is broken — surface it cleanly rather
-  // than as an uncaught 500.
-  let pdf: Buffer, latex: string, warnings: string[], atsNotes;
+  // Everything past this point can throw for reasons that have nothing to do with LaTeX (a bad
+  // evidence-bank shape, a provider/network error, a DB write failure) — all of it needs to reach
+  // the client as a JSON body, or `res.json()` on the other end throws its own opaque parse error
+  // over an empty response instead of showing what actually broke.
   try {
-    ({ latex, pdf, warnings, atsNotes } =
-      kind === "cover_letter"
-        ? await buildCoverLetter(userId, background, jobInfo ?? { title: "the role", company: "the company" }, evidenceBank, searchPreferences)
-        : await buildResume(userId, background, jobInfo, evidenceBank, searchPreferences, archetype));
+    const [background, evidenceBank, searchPreferences] = await Promise.all([
+      getProfile(userId),
+      getEvidenceBank(userId),
+      getSearchPreferences(userId),
+    ]);
+    if (!background.trim() && !evidenceBank) {
+      return NextResponse.json({ error: "Add your resume or background on your profile first." }, { status: 400 });
+    }
+
+    const job = jobId ? await getJobById(jobId) : null;
+    const jobInfo = job
+      ? { title: job.title, company: job.company, description: jobDescription }
+      : jobDescription
+        ? { title: "the role", company: "the company", description: jobDescription }
+        : undefined;
+
+    // The model returns structured content (never LaTeX); lib/resume-scaffold.ts fills the fixed
+    // house template and runs a compile → count-pages → trim loop until it fits one page. A
+    // LatexCompileError here would mean the template itself is broken — surface it cleanly rather
+    // than as an uncaught 500.
+    let pdf: Buffer, latex: string, warnings: string[], atsNotes;
+    try {
+      ({ latex, pdf, warnings, atsNotes } =
+        kind === "cover_letter"
+          ? await buildCoverLetter(userId, background, jobInfo ?? { title: "the role", company: "the company" }, evidenceBank, searchPreferences)
+          : await buildResume(userId, background, jobInfo, evidenceBank, searchPreferences, archetype));
+    } catch (err) {
+      if (err instanceof LatexCompileError) return NextResponse.json({ error: `Generation produced invalid LaTeX: ${err.message}` }, { status: 502 });
+      throw err;
+    }
+
+    // Stored alongside latex (not just recompiled on demand) so a generated document lives in the
+    // document library exactly like an uploaded one — same panel, same viewer, same re-scan path —
+    // instead of being a one-off preview that vanishes once you navigate away.
+    const filename = `${kind === "cover_letter" ? "cover-letter" : "resume"}${job ? `-${job.company}` : ""}.pdf`;
+    const blobUrl = await uploadDocumentPdf(userId, kind, filename, pdf);
+
+    const saved = await saveDocument({ userId, jobId: job?.id ?? null, kind, source: "generated", latex, blobUrl, filename, atsNotes });
+    await setActiveDocument(userId, saved.id);
+
+    return NextResponse.json({ id: saved.id, filename: saved.filename, kind, latex, atsNotes, warnings });
   } catch (err) {
-    if (err instanceof LatexCompileError) return NextResponse.json({ error: `Generation produced invalid LaTeX: ${err.message}` }, { status: 502 });
-    throw err;
+    console.error("workshop/generate failed:", err);
+    return NextResponse.json({ error: err instanceof Error ? err.message : "Generation failed" }, { status: 500 });
   }
-
-  // Stored alongside latex (not just recompiled on demand) so a generated document lives in the
-  // document library exactly like an uploaded one — same panel, same viewer, same re-scan path —
-  // instead of being a one-off preview that vanishes once you navigate away.
-  const filename = `${kind === "cover_letter" ? "cover-letter" : "resume"}${job ? `-${job.company}` : ""}.pdf`;
-  const blobUrl = await uploadDocumentPdf(userId, kind, filename, pdf);
-
-  const saved = await saveDocument({ userId, jobId: job?.id ?? null, kind, source: "generated", latex, blobUrl, filename, atsNotes });
-  await setActiveDocument(userId, saved.id);
-
-  return NextResponse.json({ id: saved.id, filename: saved.filename, kind, latex, atsNotes, warnings });
 }
