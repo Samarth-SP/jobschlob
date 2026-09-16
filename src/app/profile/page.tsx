@@ -11,6 +11,8 @@ import {
   hasApplyToken,
   regenerateApplyToken,
   clearApplyToken,
+  getSearchPreferences,
+  setSearchPreferences,
 } from "@/db/queries";
 import { scoreJobForUser } from "@/lib/match";
 import { EXTENDED_RETENTION_DAYS } from "@/lib/company-tier";
@@ -19,9 +21,12 @@ import { ProfileForm, type SaveResult } from "@/components/ProfileForm";
 import { LlmSettingsForm, type LlmSettingsResult, type RedactedLlmConfig } from "@/components/LlmSettingsForm";
 import { IdentityForm, type IdentityResult } from "@/components/IdentityForm";
 import { ApplyTokenSection } from "@/components/ApplyTokenSection";
+import { SearchPreferencesForm, type SearchPrefsResult, type RunNowResult } from "@/components/SearchPreferencesForm";
 import { encryptSecret } from "@/lib/crypto";
 import { LLM_PROCESSES, type LlmConfig, type LlmProcess, type Provider } from "@/lib/llm-config";
 import type { ApplyIdentity } from "@/lib/apply-identity";
+import { EMPTY_SEARCH_PREFERENCES } from "@/lib/search-preferences";
+import { runJobSearchForProfile } from "@/lib/job-search";
 
 export default async function ProfilePage() {
   const session = await auth();
@@ -38,6 +43,7 @@ export default async function ProfilePage() {
   };
   const identity = (await getIdentity(userId)) ?? {};
   const applyTokenSet = await hasApplyToken(userId);
+  const searchPreferences = (await getSearchPreferences(userId)) ?? EMPTY_SEARCH_PREFERENCES;
 
   async function save(_prev: SaveResult, formData: FormData): Promise<SaveResult> {
     "use server";
@@ -131,6 +137,38 @@ export default async function ProfilePage() {
     return { saved: true };
   }
 
+  async function saveSearchPrefs(_prev: SearchPrefsResult, formData: FormData): Promise<SearchPrefsResult> {
+    "use server";
+    try {
+      const csv = (v: FormDataEntryValue | null) =>
+        String(v ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+      await setSearchPreferences(userId, {
+        enabled: Boolean(formData.get("enabled")),
+        tracks: csv(formData.get("tracks")),
+        gradYear: String(formData.get("gradYear") ?? "").trim() || undefined,
+        locationsPreferred: csv(formData.get("locationsPreferred")),
+        locationsAcceptable: csv(formData.get("locationsAcceptable")),
+        remoteOk: Boolean(formData.get("remoteOk")),
+        criteria: String(formData.get("criteria") ?? "").trim() || undefined,
+      });
+      revalidatePath("/profile");
+      return { saved: true };
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : "Failed to save" };
+    }
+  }
+
+  async function runSearchNow(): Promise<RunNowResult> {
+    "use server";
+    try {
+      const result = await runJobSearchForProfile(userId);
+      revalidatePath("/dashboard");
+      return result;
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : "Search failed" };
+    }
+  }
+
   async function regenerateToken(): Promise<string> {
     "use server";
     const token = await regenerateApplyToken(userId);
@@ -154,6 +192,7 @@ export default async function ProfilePage() {
       </p>
       <ProfileForm action={save} initialBackground={background} />
       <LlmSettingsForm action={saveLlm} initial={redactedLlmConfig} />
+      <SearchPreferencesForm action={saveSearchPrefs} runNow={runSearchNow} initial={searchPreferences} />
       <IdentityForm action={saveIdentity} initial={identity} />
       <ApplyTokenSection hasToken={applyTokenSet} regenerate={regenerateToken} clear={clearToken} />
     </main>

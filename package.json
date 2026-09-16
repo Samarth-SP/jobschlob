@@ -9,7 +9,9 @@
     "lint": "eslint",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "ingest": "tsx scripts/ingest.ts"
+    "ingest": "tsx scripts/ingest.ts",
+    "job-search": "tsx scripts/job-search.ts",
+    "backfill-offer-runway": "tsx scripts/backfill-offer-runway.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.115.0",

@@ -82,3 +82,44 @@ export async function callTool<T>(
   if (!block || block.type !== "tool_use") throw new Error(`${tool.name}: model returned no structured output`);
   return block.input as T;
 }
+
+// Job search (lib/job-search.ts) needs the model to actually browse the web before it can answer,
+// which callTool()'s always-forced `tool_choice: {type:"tool"}` can't express (that forces a
+// single custom tool immediately — incompatible with also giving the model Anthropic's
+// server-executed web_search tool to call zero-or-more times first). So this is Anthropic-only,
+// and deliberately does NOT go through resolve()'s "fall back to the app's env-var key" behavior:
+// automated web search running on the app's own shared key would mean one user's search habits
+// billing the app owner. A user must configure their own Anthropic key to use this at all.
+export async function runWebSearchTool<T>(
+  userId: string,
+  system: string,
+  prompt: string,
+  tool: LlmTool,
+  maxTokens = 8000,
+): Promise<T> {
+  const config = await getLlmConfig(userId);
+  const stored = config?.keys?.anthropic;
+  if (!stored) {
+    throw new Error("Configure your own Anthropic key on the profile page to use job search.");
+  }
+  const apiKey = decryptSecret(stored);
+
+  const client = new Anthropic({ apiKey });
+  const res = await client.messages.create({
+    model: DEFAULT_MODEL.anthropic,
+    max_tokens: maxTokens,
+    system,
+    tools: [
+      { type: "web_search_20250305", name: "web_search", max_uses: 8 },
+      { name: tool.name, description: tool.description, input_schema: tool.input_schema as Anthropic.Tool["input_schema"] },
+    ],
+    tool_choice: { type: "auto" },
+    messages: [{ role: "user", content: prompt }],
+  });
+
+  const block = res.content.find((b) => b.type === "tool_use" && b.name === tool.name);
+  if (!block || block.type !== "tool_use") {
+    throw new Error(`${tool.name}: model finished (stop_reason: ${res.stop_reason}) without submitting results`);
+  }
+  return block.input as T;
+}

@@ -1,0 +1,21 @@
+name: Personalized job search
+
+on:
+  schedule:
+    # ~8am ET (UTC-4/UTC-5 depending on DST) — doesn't shift itself for DST, may drift an hour.
+    - cron: '0 12 * * *'
+  workflow_dispatch:
+
+jobs:
+  job-search:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npm run job-search
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          SETTINGS_ENCRYPTION_KEY: ${{ secrets.SETTINGS_ENCRYPTION_KEY }}
