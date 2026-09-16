@@ -61,6 +61,15 @@ export const profiles = pgTable(
     // (which only narrows what's already in the shared jobs table for display). See
     // lib/search-preferences.ts for the shape. Null means search is off for this user.
     searchPreferences: jsonb("search_preferences"),
+    // Structured, per-bullet evidence bank extracted from an uploaded resume (experiences /
+    // projects / leadership / education / skills / rawFacts) — see lib/evidence.ts for the
+    // shape. Distinct from `background` (which stays a free-text supplementary catch-all): the
+    // workshop prefers this when present, ranking and citing individual bullets instead of
+    // handing the model one prose blob. Null until the user uploads a resume. Same key names as
+    // the `experiences`/`projects`/`education`/`skills`/`raw_facts` payload
+    // `/api/apply/queue/route.ts` already sends BoofSimplify (empty today) — populating this
+    // column is what fills that payload in for real, with no wire-contract change.
+    evidenceBank: jsonb("evidence_bank"),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("profiles_apply_api_token_idx").on(t.applyApiToken)],

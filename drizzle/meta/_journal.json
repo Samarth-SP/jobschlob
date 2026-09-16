@@ -71,6 +71,13 @@
       "when": 1789533582382,
       "tag": "0009_early_vulcan",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1789588968574,
+      "tag": "0010_true_the_renegades",
+      "breakpoints": true
     }
   ]
 }
