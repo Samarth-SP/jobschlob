@@ -3,13 +3,32 @@
 // a machine with DATABASE_URL) and POST /api/jobs/import (bearer-token path, for a machine that
 // only has a jobschlob apply-api token — see that route's comment for why both exist).
 //
-// No fit score comes from Offer Runway itself (it's a plain tracker, not an LLM evaluator) — score
-// exactly like any other newly-seen job, via the same keyword-overlap match scripts/ingest.ts uses.
+// Scored via an LLM (lib/offer-runway-score.ts), not the cron board's cheap keyword matcher — see
+// that file's comment for why this is safe to do here specifically (a small, hand-curated set)
+// and not on the multi-thousand-job cron-ingested board.
 import { jobId as computeJobId } from "./dedupe";
-import { getJobByUrl, upsertJobs, saveJobMatches, getProfile, getEvidenceBank } from "@/db/queries";
-import { scoreJobForUser } from "./match";
+import { getJobByUrl, upsertJobs, saveJobMatches, getProfile, getEvidenceBank, getSearchPreferences, getMatchedJobIds } from "@/db/queries";
+import { scoreOfferRunwayJob } from "./offer-runway-score";
 import { autoQueueMatches } from "./auto-apply";
 import { jobs } from "@/db/schema";
+
+// Bounds how many scoreOfferRunwayJob calls run at once — plenty of headroom under a serverless
+// function's execution window even for a large one-time forceRescore batch, without opening
+// hundreds of concurrent model requests at once.
+const SCORE_CONCURRENCY = 8;
+
+async function mapWithConcurrency<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let next = 0;
+  async function worker() {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i]);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
 
 // The later of the two dates a listing carries: its original posting date (which can be weeks
 // old for something Offer Runway curated a while ago but is still tracking) and when it was added
@@ -64,7 +83,7 @@ export type ImportResult = {
 export async function importOfferRunwayListings(
   userId: string,
   docs: OfferRunwayDoc[],
-  { dryRun = false }: { dryRun?: boolean } = {},
+  { dryRun = false, forceRescore = false }: { dryRun?: boolean; forceRescore?: boolean } = {},
 ): Promise<ImportResult & { dryRunPreview?: string[] }> {
   const source = "offer-runway";
   const toInsert: (typeof jobs.$inferInsert)[] = [];
@@ -122,13 +141,30 @@ export async function importOfferRunwayListings(
 
   if (toInsert.length) await upsertJobs(toInsert);
 
-  const [background, evidenceBank] = await Promise.all([getProfile(userId), getEvidenceBank(userId)]);
-  const matches = candidates
-    .map((job) => {
-      const result = scoreJobForUser(job, background, evidenceBank);
-      return result ? { job, score: result.score, rationale: result.rationale } : null;
-    })
-    .filter((m): m is { job: JobRow; score: number; rationale: string } => m !== null);
+  // The actual cost guard: an LLM call per job is fine for Offer Runway's small, hand-curated set,
+  // but only for jobs that don't already have a score. Without this, the daily scheduled re-import
+  // (which re-sees every listing, including ones from prior days) would re-pay for an LLM call on
+  // every job, every morning, forever. forceRescore bypasses this for a deliberate one-time
+  // re-grade (e.g. right after evidence bank content actually changes).
+  const alreadyMatched = forceRescore ? new Set<string>() : await getMatchedJobIds(userId, candidates.map((c) => c.id));
+  const toScore = candidates.filter((c) => !alreadyMatched.has(c.id));
+
+  const [background, evidenceBank, searchPreferences] = await Promise.all([
+    getProfile(userId), getEvidenceBank(userId), getSearchPreferences(userId),
+  ]);
+
+  const scored = await mapWithConcurrency(toScore, SCORE_CONCURRENCY, async (job) => {
+    try {
+      const result = await scoreOfferRunwayJob(userId, job, evidenceBank, background, searchPreferences);
+      return { job, score: result.score * 20, rationale: `${result.recommendation} — ${result.rationale}` };
+    } catch (e) {
+      // A single bad/unreachable model call shouldn't sink the whole batch — that job just stays
+      // unscored this run and gets picked up (retried) on the next one, since it's still unmatched.
+      console.error(`offer-runway score failed for ${job.company} — ${job.title}:`, e);
+      return null;
+    }
+  });
+  const matches = scored.filter((m): m is { job: JobRow; score: number; rationale: string } => m !== null);
 
   await saveJobMatches(matches.map((m) => ({ userId, jobId: m.job.id, score: m.score, rationale: m.rationale })));
   const queued = await autoQueueMatches(userId, matches);

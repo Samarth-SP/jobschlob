@@ -7,7 +7,8 @@ export type LlmProcess =
   | "jdParse"
   | "searchRefine"
   | "evidenceExtract"
-  | "interviewQuestions";
+  | "interviewQuestions"
+  | "offerRunwayScore";
 export type Provider = "anthropic" | "openai";
 
 export type ProcessRoute = { provider: Provider; model?: string };
@@ -27,6 +28,7 @@ export const LLM_PROCESSES: LlmProcess[] = [
   "searchRefine",
   "evidenceExtract",
   "interviewQuestions",
+  "offerRunwayScore",
 ];
 
 export const PROCESS_LABELS: Record<LlmProcess, string> = {
@@ -36,4 +38,5 @@ export const PROCESS_LABELS: Record<LlmProcess, string> = {
   searchRefine: "Job search \"Refine with AI\"",
   evidenceExtract: "Resume → evidence bank extraction",
   interviewQuestions: "Profile follow-up questions",
+  offerRunwayScore: "Offer Runway job scoring",
 };

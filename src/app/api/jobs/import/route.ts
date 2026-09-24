@@ -3,6 +3,9 @@ import { authenticateApplyRequest } from "@/lib/apply-auth";
 import { importOfferRunwayListings, unwrapOfferRunwayDoc } from "@/lib/import-offer-runway";
 
 export const runtime = "nodejs";
+// A forceRescore batch runs one LLM call per job (mapWithConcurrency in import-offer-runway.ts
+// bounds concurrency, not total count) — give it real headroom rather than the platform default.
+export const maxDuration = 300;
 
 // Bearer-token path for importing "Offer Runway" listings (see src/lib/import-offer-runway.ts) —
 // for a machine that has a jobschlob apply-api token but not this deployment's DATABASE_URL (e.g.
@@ -20,7 +23,8 @@ export async function POST(req: Request) {
 
   const docs = raw.map(unwrapOfferRunwayDoc);
   const dryRun = body?.dryRun === true;
-  const result = await importOfferRunwayListings(userId, docs, { dryRun });
+  const forceRescore = body?.forceRescore === true;
+  const result = await importOfferRunwayListings(userId, docs, { dryRun, forceRescore });
 
   return NextResponse.json({ ok: true, ...result });
 }

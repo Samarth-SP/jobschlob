@@ -14,11 +14,12 @@ import { readFileSync } from "node:fs";
 import { importOfferRunwayListings, unwrapOfferRunwayDoc } from "../src/lib/import-offer-runway";
 
 function parseArgs(argv: string[]) {
-  const out: { data?: string; user?: string; dryRun: boolean } = { dryRun: false };
+  const out: { data?: string; user?: string; dryRun: boolean; forceRescore: boolean } = { dryRun: false, forceRescore: false };
   for (let i = 0; i < argv.length; i++) {
     if (argv[i] === "--data") out.data = argv[++i];
     else if (argv[i] === "--user") out.user = argv[++i];
     else if (argv[i] === "--dry-run") out.dryRun = true;
+    else if (argv[i] === "--force-rescore") out.forceRescore = true;
   }
   return out;
 }
@@ -26,7 +27,9 @@ function parseArgs(argv: string[]) {
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (!args.data || !args.user) {
-    console.error("usage: import-offer-runway.ts --data <listings.json> --user <jobschlob user email> [--dry-run]");
+    console.error(
+      "usage: import-offer-runway.ts --data <listings.json> --user <jobschlob user email> [--dry-run] [--force-rescore]",
+    );
     process.exit(1);
   }
 
@@ -37,7 +40,7 @@ async function main() {
   }
   const docs = raw.map(unwrapOfferRunwayDoc);
 
-  const result = await importOfferRunwayListings(args.user, docs, { dryRun: args.dryRun });
+  const result = await importOfferRunwayListings(args.user, docs, { dryRun: args.dryRun, forceRescore: args.forceRescore });
   console.log(
     `parsed ${result.parsed} doc(s): ${result.imported} importable, ${result.skippedClosed} skipped (closed), ` +
       `${result.skippedIncomplete} skipped (missing company/role/url)`,
