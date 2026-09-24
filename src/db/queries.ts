@@ -1,4 +1,4 @@
-import { eq, and, or, desc, sql, avg, count, inArray, notInArray, gte, lt, isNotNull } from "drizzle-orm";
+import { eq, ne, and, or, desc, sql, avg, count, inArray, notInArray, gte, lt, isNotNull } from "drizzle-orm";
 import { db } from "./client";
 import { jobs, trackedJobs, profiles, jobMatches, applicationEvents, documents, applyTasks } from "./schema";
 import type { DashboardFilters } from "@/lib/dashboard-filters";
@@ -11,6 +11,7 @@ import {
   DEFAULT_RETENTION_DAYS,
   EXTENDED_RETENTION_DAYS,
   EXTENDED_RETENTION_COMPANIES,
+  OFFER_RUNWAY_SOURCE,
 } from "@/lib/company-tier";
 
 // Every function below takes userId first and filters on it — jobs is the one shared,
@@ -22,9 +23,12 @@ const companyLower = sql`lower(${jobs.company})`;
 // A job is "live" on the board while it's inside its retention window: EXTENDED_RETENTION_DAYS
 // for the exclusivity-clause companies (see company-tier.ts), DEFAULT_RETENTION_DAYS for
 // everyone else. Shared by getRankedBoard (what a user sees) and scripts/ingest.ts (what gets
-// pruned) so the two windows can't drift.
+// pruned) so the two windows can't drift. Offer Runway jobs are exempt from the window entirely —
+// see OFFER_RUNWAY_SOURCE's comment in company-tier.ts for why a time-based window is the wrong
+// model for that source.
 export function withinRetentionWindow() {
   return or(
+    eq(jobs.source, OFFER_RUNWAY_SOURCE),
     and(inArray(companyLower, EXTENDED_RETENTION_COMPANIES), gte(jobs.postedAt, daysAgo(EXTENDED_RETENTION_DAYS))),
     and(notInArray(companyLower, EXTENDED_RETENTION_COMPANIES), gte(jobs.postedAt, daysAgo(DEFAULT_RETENTION_DAYS))),
   );
@@ -32,10 +36,16 @@ export function withinRetentionWindow() {
 
 // Inverse, for pruning — written out rather than not(withinRetentionWindow()) so a NULL
 // postedAt (a few legacy rows) matches neither branch and is never pruned, same as before.
+// Offer Runway jobs are never "past" their window (see withinRetentionWindow's comment) — pruning
+// them is instead purely status-driven, at import time (a closed listing never even reaches the
+// board — see import-offer-runway.ts's skippedClosed).
 export function pastRetentionWindow() {
-  return or(
-    and(inArray(companyLower, EXTENDED_RETENTION_COMPANIES), lt(jobs.postedAt, daysAgo(EXTENDED_RETENTION_DAYS))),
-    and(notInArray(companyLower, EXTENDED_RETENTION_COMPANIES), lt(jobs.postedAt, daysAgo(DEFAULT_RETENTION_DAYS))),
+  return and(
+    ne(jobs.source, OFFER_RUNWAY_SOURCE),
+    or(
+      and(inArray(companyLower, EXTENDED_RETENTION_COMPANIES), lt(jobs.postedAt, daysAgo(EXTENDED_RETENTION_DAYS))),
+      and(notInArray(companyLower, EXTENDED_RETENTION_COMPANIES), lt(jobs.postedAt, daysAgo(DEFAULT_RETENTION_DAYS))),
+    ),
   );
 }
 
@@ -275,6 +285,18 @@ export async function getMatchedJobIds(userId: string, jobIds: string[]): Promis
     .from(jobMatches)
     .where(and(eq(jobMatches.userId, userId), inArray(jobMatches.jobId, jobIds)));
   return new Set(rows.map((r) => r.jobId));
+}
+
+// Existing score for a set of jobIds this user already has a match for — used to let a setting
+// change (e.g. turning on auto-apply) apply against already-scored jobs on the next import, not
+// just newly-scored ones. See src/lib/import-offer-runway.ts.
+export async function getJobMatchScores(userId: string, jobIds: string[]): Promise<Map<string, number>> {
+  if (jobIds.length === 0) return new Map();
+  const rows = await db
+    .select({ jobId: jobMatches.jobId, score: jobMatches.score })
+    .from(jobMatches)
+    .where(and(eq(jobMatches.userId, userId), inArray(jobMatches.jobId, jobIds)));
+  return new Map(rows.map((r) => [r.jobId, r.score]));
 }
 
 export async function getApplicationEventsByDay(userId: string) {

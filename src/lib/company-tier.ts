@@ -18,6 +18,15 @@
 export const DEFAULT_RETENTION_DAYS = 7;
 export const EXTENDED_RETENTION_DAYS = 30;
 
+// Offer Runway jobs (src/lib/import-offer-runway.ts) have no time-based staleness signal of their
+// own — a listing persists in that tracker until it's explicitly marked closed (filtered out at
+// import time, never even reaching the board), not until some fixed number of days pass. A job
+// added there three weeks ago that's still open is exactly as relevant today as the day it was
+// added. Exempt from the time-based retention window entirely, same as a job any user tracks
+// already is — see getRankedBoard()/pastRetentionWindow() in db/queries.ts and the prune step in
+// scripts/ingest.ts, which both need to agree on this or the board and prune can drift.
+export const OFFER_RUNWAY_SOURCE = "offer-runway";
+
 export const EXTENDED_RETENTION_COMPANIES: string[] = [
   // --- Large big tech ---
   "apple", "google", "alphabet", "microsoft", "amazon", "amazon web services", "aws", "meta",

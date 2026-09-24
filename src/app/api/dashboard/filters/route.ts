@@ -8,6 +8,10 @@ export async function POST(req: Request) {
 
   const body = await req.json();
   const strings = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : undefined);
+  const autoApply =
+    body.autoApply && typeof body.autoApply === "object"
+      ? { enabled: body.autoApply.enabled === true, minScore: typeof body.autoApply.minScore === "number" ? body.autoApply.minScore : 0 }
+      : undefined;
   await setFilters(session.user.email, {
     minScore: typeof body.minScore === "number" ? body.minScore : undefined,
     locations: strings(body.locations),
@@ -16,6 +20,7 @@ export async function POST(req: Request) {
     categories: strings(body.categories),
     levels: strings(body.levels),
     degreeLevels: strings(body.degreeLevels),
+    autoApply,
   });
 
   return NextResponse.json({ ok: true });

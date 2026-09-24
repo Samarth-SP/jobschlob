@@ -7,9 +7,10 @@
 // that file's comment for why this is safe to do here specifically (a small, hand-curated set)
 // and not on the multi-thousand-job cron-ingested board.
 import { jobId as computeJobId } from "./dedupe";
-import { getJobByUrl, upsertJobs, saveJobMatches, getProfile, getEvidenceBank, getSearchPreferences, getMatchedJobIds } from "@/db/queries";
+import { getJobByUrl, upsertJobs, saveJobMatches, getProfile, getEvidenceBank, getSearchPreferences, getMatchedJobIds, getJobMatchScores } from "@/db/queries";
 import { scoreOfferRunwayJob } from "./offer-runway-score";
 import { autoQueueMatches } from "./auto-apply";
+import { OFFER_RUNWAY_SOURCE } from "./company-tier";
 import { jobs } from "@/db/schema";
 
 // Bounds how many scoreOfferRunwayJob calls run at once — plenty of headroom under a serverless
@@ -85,7 +86,7 @@ export async function importOfferRunwayListings(
   docs: OfferRunwayDoc[],
   { dryRun = false, forceRescore = false }: { dryRun?: boolean; forceRescore?: boolean } = {},
 ): Promise<ImportResult & { dryRunPreview?: string[] }> {
-  const source = "offer-runway";
+  const source = OFFER_RUNWAY_SOURCE;
   const toInsert: (typeof jobs.$inferInsert)[] = [];
   const candidates: JobRow[] = [];
   let skippedClosed = 0;
@@ -167,7 +168,23 @@ export async function importOfferRunwayListings(
   const matches = scored.filter((m): m is { job: JobRow; score: number; rationale: string } => m !== null);
 
   await saveJobMatches(matches.map((m) => ({ userId, jobId: m.job.id, score: m.score, rationale: m.rationale })));
-  const queued = await autoQueueMatches(userId, matches);
+
+  // autoQueueMatches runs against EVERY current candidate's score, not just the ones scored this
+  // run — otherwise turning on auto-apply (or raising its bar) after a job was already scored on a
+  // prior import would never actually queue it; the setting would only affect jobs that happen to
+  // be new from that point on. Already-matched candidates' scores come from getJobMatchScores;
+  // freshly-scored ones already have theirs in hand.
+  const alreadyMatchedIds = candidates
+    .map((c) => c.id)
+    .filter((id) => !matches.some((m) => m.job.id === id));
+  const priorScores = await getJobMatchScores(userId, alreadyMatchedIds);
+  const allCurrentMatches = [
+    ...matches,
+    ...candidates
+      .filter((c) => priorScores.has(c.id))
+      .map((c) => ({ job: c, score: priorScores.get(c.id)! })),
+  ];
+  const queued = await autoQueueMatches(userId, allCurrentMatches);
 
   return {
     parsed: docs.length, imported: candidates.length, scored: matches.length, queued,
