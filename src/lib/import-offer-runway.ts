@@ -6,10 +6,28 @@
 // No fit score comes from Offer Runway itself (it's a plain tracker, not an LLM evaluator) — score
 // exactly like any other newly-seen job, via the same keyword-overlap match scripts/ingest.ts uses.
 import { jobId as computeJobId } from "./dedupe";
-import { getJobByUrl, upsertJobs, saveJobMatches, getProfile } from "@/db/queries";
+import { getJobByUrl, upsertJobs, saveJobMatches, getProfile, getEvidenceBank } from "@/db/queries";
 import { scoreJobForUser } from "./match";
 import { autoQueueMatches } from "./auto-apply";
 import { jobs } from "@/db/schema";
+
+// The later of the two dates a listing carries: its original posting date (which can be weeks
+// old for something Offer Runway curated a while ago but is still tracking) and when it was added
+// to the tracker. getRankedBoard()'s retention window is keyed on postedAt, so using the original
+// posting date alone would make a freshly-surfaced-but-originally-old listing invisible on the
+// dashboard (and eventually prunable by the cron ingest) even though it's actively being tracked —
+// same "a source can re-confirm a still-open listing" reasoning scripts/ingest.ts already applies
+// to the SimplifyJobs feeds (postedAt = max(date_posted, date_updated)).
+function laterOf(...dates: (string | undefined)[]): Date | null {
+  let best: Date | null = null;
+  for (const d of dates) {
+    if (!d) continue;
+    const t = Date.parse(d);
+    if (Number.isNaN(t)) continue;
+    if (!best || t > best.getTime()) best = new Date(t);
+  }
+  return best;
+}
 
 type JobRow = typeof jobs.$inferSelect;
 
@@ -64,16 +82,18 @@ export async function importOfferRunwayListings(
       continue;
     }
 
-    // Same URL already on the board (this exact posting also came in via the cron ingest, or a
-    // previous run of this import) — attach to that row instead of minting a duplicate.
+    // Same URL already on the board. If some OTHER source owns it (the cron ingest independently
+    // found the same posting), attach our score to that row rather than overwriting its fields
+    // with our (likely less precise) title/company/category. If WE created it on a previous run
+    // of this same import, it's safe (and necessary — see laterOf's comment) to refresh it: the
+    // upsert below lands on the same id either way, since it's a deterministic hash of source+url.
     const existing = await getJobByUrl(doc.url);
-    if (existing) {
+    if (existing && existing.source !== source) {
       candidates.push(existing);
       continue;
     }
 
-    const dateStr = doc.posted ?? doc.addedAt;
-    const postedAt = dateStr && !Number.isNaN(Date.parse(dateStr)) ? new Date(dateStr) : null;
+    const postedAt = laterOf(doc.posted, doc.addedAt, existing?.postedAt?.toISOString());
     const id = computeJobId(source, doc.url);
     const row = {
       id,
@@ -102,10 +122,10 @@ export async function importOfferRunwayListings(
 
   if (toInsert.length) await upsertJobs(toInsert);
 
-  const background = await getProfile(userId);
+  const [background, evidenceBank] = await Promise.all([getProfile(userId), getEvidenceBank(userId)]);
   const matches = candidates
     .map((job) => {
-      const result = scoreJobForUser(job, background);
+      const result = scoreJobForUser(job, background, evidenceBank);
       return result ? { job, score: result.score, rationale: result.rationale } : null;
     })
     .filter((m): m is { job: JobRow; score: number; rationale: string } => m !== null);

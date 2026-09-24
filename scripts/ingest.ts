@@ -8,6 +8,7 @@ import {
 } from "../src/db/queries";
 import { jobId } from "../src/lib/dedupe";
 import { scoreJobForUser } from "../src/lib/match";
+import { isEmptyEvidenceBank, type EvidenceBank } from "../src/lib/evidence";
 import { classifyLevel } from "../src/lib/level-heuristic";
 import { classifyDegree, stripHtml } from "../src/lib/degree-heuristic";
 import { jobs, trackedJobs } from "../src/db/schema";
@@ -283,12 +284,13 @@ async function main() {
   const jobIds = rows.map((r) => r.id);
   let scored = 0;
   for (const profile of profiles) {
-    if (!profile.background.trim()) continue;
+    const bank = profile.evidenceBank as EvidenceBank | null;
+    if (!profile.background.trim() && isEmptyEvidenceBank(bank)) continue;
     const alreadyMatched = await getMatchedJobIds(profile.userId, jobIds);
     const toScore = rows.filter((r) => !alreadyMatched.has(r.id));
     const matches: { userId: string; jobId: string; score: number; rationale: string | null }[] = [];
     for (const job of toScore) {
-      const result = scoreJobForUser(job, profile.background);
+      const result = scoreJobForUser(job, profile.background, bank);
       if (result) matches.push({ userId: profile.userId, jobId: job.id, ...result });
     }
     await saveJobMatches(matches);

@@ -3,6 +3,8 @@
 // slow (hours, sequential) and a real ongoing cost for a score that's advisory at best. The LLM
 // budget is reserved for the resume/cover-letter workshop (lib/resume-scaffold.ts), where a
 // generated document actually benefits from real language understanding.
+import { isEmptyEvidenceBank, type EvidenceBank } from "./evidence";
+
 const STOPWORDS = new Set([
   "a", "an", "the", "and", "or", "but", "of", "in", "on", "at", "to", "for", "with", "by", "from",
   "is", "are", "was", "were", "be", "been", "being", "as", "it", "this", "that", "these", "those",
@@ -22,11 +24,29 @@ function tokenize(text: string): Set<string> {
   return new Set(words);
 }
 
+// Flattens every bit of text an evidence bank holds (bullets, skills, org/title/context, raw
+// facts) into one corpus — a much richer keyword pool than the free-text `background` blob, which
+// is why scoreJobForUser prefers it below. Same "prefer the bank when non-empty" convention
+// lib/resume-scaffold.ts already uses for the workshop.
+function evidenceBankText(bank: EvidenceBank): string {
+  const parts: string[] = [];
+  for (const entry of [...bank.experiences, ...bank.projects, ...bank.leadership]) {
+    parts.push(entry.title, entry.org, entry.context ?? "");
+    for (const b of entry.bullets) parts.push(b.text, ...b.skills);
+  }
+  for (const edu of bank.education) parts.push(edu.school, edu.degree ?? "", edu.field ?? "");
+  for (const skills of Object.values(bank.skills)) parts.push(...skills);
+  parts.push(...bank.rawFacts);
+  return parts.join(" ");
+}
+
 export function scoreJobForUser(
   job: { title: string; company: string },
   background: string,
+  evidenceBank?: EvidenceBank | null,
 ): { score: number; rationale: string } | null {
-  const profileTokens = tokenize(background);
+  const corpus = evidenceBank && !isEmptyEvidenceBank(evidenceBank) ? evidenceBankText(evidenceBank) : background;
+  const profileTokens = tokenize(corpus);
   if (profileTokens.size === 0) return null;
 
   const jobTokens = tokenize(`${job.title} ${job.company}`);

@@ -31,7 +31,7 @@ import type { ApplyIdentity } from "@/lib/apply-identity";
 import { EMPTY_SEARCH_PREFERENCES } from "@/lib/search-preferences";
 import { runJobSearchForProfile } from "@/lib/job-search";
 import { generateRefineQuestions, applyRefineAnswers } from "@/lib/search-refine";
-import { EMPTY_EVIDENCE_BANK, assignEvidenceIds, type EvidenceBank } from "@/lib/evidence";
+import { EMPTY_EVIDENCE_BANK, assignEvidenceIds, isEmptyEvidenceBank, type EvidenceBank } from "@/lib/evidence";
 import { findGaps, generateFollowupQuestions, applyFollowupAnswers, type Gap } from "@/lib/evidence-interview";
 
 export default async function ProfilePage() {
@@ -66,11 +66,12 @@ export default async function ProfilePage() {
     // returned count is what tells the save button rescoring actually happened — the keyword
     // scorer only looks at a job's own title/company tokens, so a background edit often doesn't
     // move the number at all, which otherwise reads as "nothing happened."
-    if (!background.trim()) return { rescored: 0 };
+    const currentBank = await getEvidenceBank(userId);
+    if (!background.trim() && isEmptyEvidenceBank(currentBank)) return { rescored: 0 };
     const cutoff = new Date(Date.now() - EXTENDED_RETENTION_DAYS * 24 * 60 * 60 * 1000);
     const recentJobs = await getJobsSince(cutoff);
     const matches = recentJobs.flatMap((job) => {
-      const result = scoreJobForUser(job, background);
+      const result = scoreJobForUser(job, background, currentBank);
       return result ? [{ userId, jobId: job.id, ...result }] : [];
     });
     await saveJobMatches(matches);
