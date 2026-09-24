@@ -21,7 +21,7 @@ const STATUS_COLOR: Record<string, string> = {
 // Queues a tracked job for the local BoofSimplify worker (see boof/remote.py) to prefill
 // asynchronously — no browser tab to watch here; the worker picks this up on its own schedule and
 // reports back via POST /api/apply/status, which flips `status` to one of the labels above.
-export function ApplyQueueButton({ jobId, initialStatus }: { jobId: string; initialStatus: ApplyStatus }) {
+export function ApplyQueueButton({ jobId, jobUrl, initialStatus }: { jobId: string; jobUrl: string; initialStatus: ApplyStatus }) {
   const [status, setStatus] = useState(initialStatus);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -48,9 +48,22 @@ export function ApplyQueueButton({ jobId, initialStatus }: { jobId: string; init
   return (
     <div className="flex items-center gap-2 text-xs">
       {status && (
-        <span className={STATUS_COLOR[status.status] ?? "text-foreground-muted"} title={status.notes ?? undefined}>
-          {STATUS_LABEL[status.status] ?? status.status}
-        </span>
+        <>
+          <span className={STATUS_COLOR[status.status] ?? "text-foreground-muted"} title={status.notes ?? undefined}>
+            {STATUS_LABEL[status.status] ?? status.status}
+          </span>
+          {/* boof is the only thing with a real browser — this just deep-links into its local UI
+              for the job with this exact URL; boof resolves it once it's synced the task (see
+              GET /open in boof/web/app.py). No embedding, no polling boof's status from here. */}
+          <a
+            href={`http://127.0.0.1:8765/open?url=${encodeURIComponent(jobUrl)}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-foreground-muted hover:text-accent hover:underline"
+          >
+            Open in boof →
+          </a>
+        </>
       )}
       <button
         onClick={queue}

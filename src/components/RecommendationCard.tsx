@@ -1,7 +1,10 @@
 import { ScoreRing } from "@/components/ScoreRing";
 import { StatusEditor } from "@/components/StatusEditor";
 
-const CATEGORY_LABELS: Record<string, string> = { tech: "Tech", consulting: "Consulting", vc_pe: "VC/PE", robotics: "Robotics" };
+const CATEGORY_LABELS: Record<string, string> = {
+  tech: "Tech", consulting: "Consulting", vc_pe: "VC/PE", robotics: "Robotics",
+  swe: "SWE", techconsulting: "Tech consulting", biotech: "Biotech",
+};
 const LEVEL_LABELS: Record<string, string> = { internship: "Internship", new_grad: "New grad" };
 const DEGREE_LABELS: Record<string, string> = { bachelors: "Bachelor's", masters: "Master's", phd: "PhD" };
 

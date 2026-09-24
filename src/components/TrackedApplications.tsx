@@ -79,7 +79,7 @@ export function TrackedApplications({
                     View posting ↗
                   </a>
                   <div className="flex items-center gap-3">
-                    <ApplyQueueButton jobId={job.id} initialStatus={applyStatusByJob[job.id] ?? null} />
+                    <ApplyQueueButton jobId={job.id} jobUrl={job.url} initialStatus={applyStatusByJob[job.id] ?? null} />
                     <StatusEditor jobId={job.id} status={status} />
                   </div>
                 </div>

@@ -22,7 +22,12 @@ type Job = {
   rationale: string | null;
 };
 
-const CATEGORY_LABELS: Record<string, string> = { tech: "Tech", consulting: "Consulting", vc_pe: "VC/PE", robotics: "Robotics" };
+const CATEGORY_LABELS: Record<string, string> = {
+  tech: "Tech", consulting: "Consulting", vc_pe: "VC/PE", robotics: "Robotics",
+  // From "Offer Runway" (scripts/import-offer-runway.ts) — a disjoint category set from the cron
+  // ingest's own tech/consulting/vc_pe/robotics, kept as-is rather than lossily remapped.
+  swe: "SWE", techconsulting: "Tech consulting", biotech: "Biotech",
+};
 const LEVEL_LABELS: Record<string, string> = { internship: "Internship", new_grad: "New grad" };
 const DEGREE_LABELS: Record<string, string> = { bachelors: "Bachelor's", masters: "Master's", phd: "PhD" };
 
@@ -38,6 +43,8 @@ export function NewJobsSection({ jobs, initialFilters }: { jobs: Job[]; initialF
   const [categories, setCategories] = useState<string[]>(initialFilters.categories ?? []);
   const [levels, setLevels] = useState<string[]>(initialFilters.levels ?? []);
   const [degreeLevels, setDegreeLevels] = useState<string[]>(initialFilters.degreeLevels ?? []);
+  const [autoApplyEnabled, setAutoApplyEnabled] = useState(initialFilters.autoApply?.enabled ?? false);
+  const [autoApplyMinScore, setAutoApplyMinScore] = useState(initialFilters.autoApply?.minScore ?? 80);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const locationCounts = useMemo(() => {
@@ -81,7 +88,11 @@ export function NewJobsSection({ jobs, initialFilters }: { jobs: Job[]; initialF
   }
 
   function update(next: Partial<DashboardFilters>) {
-    const merged = { minScore, locations, areas, company, categories, levels, degreeLevels, ...next };
+    const merged = {
+      minScore, locations, areas, company, categories, levels, degreeLevels,
+      autoApply: { enabled: autoApplyEnabled, minScore: autoApplyMinScore },
+      ...next,
+    };
     if (next.minScore !== undefined) setMinScore(next.minScore);
     if (next.locations !== undefined) setLocations(next.locations);
     if (next.areas !== undefined) setAreas(next.areas);
@@ -89,6 +100,19 @@ export function NewJobsSection({ jobs, initialFilters }: { jobs: Job[]; initialF
     if (next.categories !== undefined) setCategories(next.categories);
     if (next.levels !== undefined) setLevels(next.levels);
     if (next.degreeLevels !== undefined) setDegreeLevels(next.degreeLevels);
+    persist(merged);
+  }
+
+  // Separate from update() since autoApply is a nested object, not a flat field — narrows/auto-
+  // queues via the *same* locations/categories/levels/degreeLevels/company above (see
+  // lib/auto-apply.ts), plus its own (typically higher) score bar.
+  function updateAutoApply(next: Partial<{ enabled: boolean; minScore: number }>) {
+    const merged = {
+      minScore, locations, areas, company, categories, levels, degreeLevels,
+      autoApply: { enabled: autoApplyEnabled, minScore: autoApplyMinScore, ...next },
+    };
+    if (next.enabled !== undefined) setAutoApplyEnabled(next.enabled);
+    if (next.minScore !== undefined) setAutoApplyMinScore(next.minScore);
     persist(merged);
   }
 
@@ -232,6 +256,31 @@ export function NewJobsSection({ jobs, initialFilters }: { jobs: Job[]; initialF
             </div>
           </div>
         )}
+
+        <div className="flex flex-wrap items-center gap-3 rounded border border-accent/20 bg-accent/5 px-3 py-2">
+          <label className="flex items-center gap-2 text-foreground">
+            <input
+              type="checkbox"
+              checked={autoApplyEnabled}
+              onChange={(e) => updateAutoApply({ enabled: e.target.checked })}
+            />
+            Auto-queue for boof
+          </label>
+          <span className="text-foreground-muted">above</span>
+          <input
+            type="number"
+            min={0}
+            max={100}
+            value={autoApplyMinScore}
+            disabled={!autoApplyEnabled}
+            onChange={(e) => updateAutoApply({ minScore: Number(e.target.value) })}
+            className="w-16 rounded border border-accent/30 bg-background px-2 py-1 text-foreground disabled:opacity-50"
+          />
+          <span className="text-foreground-muted">
+            match score (using the Type/Level/Degree/Location filters above to narrow which jobs qualify) —
+            still reviewed and submitted by hand, boof never auto-submits.
+          </span>
+        </div>
       </div>
 
       <div className="flex flex-col gap-2">

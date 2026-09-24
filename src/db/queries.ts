@@ -75,6 +75,13 @@ export async function getJobById(id: string) {
   return job ?? null;
 }
 
+// Used by scripts/import-careerops.ts to fold an externally-evaluated posting into an existing
+// board row (any source) instead of minting a second row for the same URL.
+export async function getJobByUrl(url: string) {
+  const [job] = await db.select().from(jobs).where(eq(jobs.url, url));
+  return job ?? null;
+}
+
 export async function getTrackedJobs(userId: string) {
   return db
     .select({ job: jobs, status: trackedJobs.status, notes: trackedJobs.notes })
